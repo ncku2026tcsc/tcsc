@@ -1,6 +1,6 @@
 # 繁體中文自動選字 v2.1
 
-> ## ⬇️ [**點此下載執行檔（Windows，免安裝免設定）**](https://github.com/ncku2026tcsc/tcsc/releases/tag/v2.1)
+> ## ⬇️ [**點此下載執行檔（Windows，免安裝免設定）**](https://github.com/ncku2026tcsc/tcsc/releases/tag/latest)
 > 解壓_v2.1.zip後直接執行 `tcsc.exe`，常駐系統匣。一般使用者看下面「怎麼用」就夠了。
 >
 
