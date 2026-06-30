@@ -2,8 +2,7 @@
 # 繁中自動選字（TCSC）— 新注音同音錯字校正
 # Copyright (C) 2026 tcsc-dev  <https://github.com/ncku2026tcsc/tcsc>
 # Licensed under the GNU General Public License v3.0 or later; see LICENSE.
-"""繁中自動選字 — 獨立 exe 進入點（ONNX 引擎，無 torch）。
-由開發版本鏈攤平而成。F1 修正/循環·F2 重算·F3 學詞·F4 反白·F5 標記·F6 框·F7 前30字·F9 暫停·F10 記難例；F6 自動切注音、系統匣可記憶勾選、崩潰捕捉、開機自動啟動。"""
+"""繁中自動選字 — 獨立 exe 進入點（ONNX 引擎，無 torch）。由開發版本鏈 app_exe→v32 攤平而成（行為逐字相同）。"""
 
 
 # ===== app_exe =====
@@ -27,9 +26,10 @@ from PIL import Image, ImageDraw
 
 from csc import logbook, winkeys as wk, hotkey
 from csc.select_corrector_onnx import OnnxCorrector
+from csc.version import VERSION
 
-APP_TITLE = "繁中自動選字 v2.1"
-APP_AUMID = "ZhuyinAutoFix.v2_1"
+APP_TITLE = f"繁中自動選字 {VERSION}"   # 版本號取自 csc/version.py 單一來源；通知標題/tray tooltip/說明標題共用
+APP_AUMID = "ZhuyinAutoFix.v2_3"       # 內部通知識別碼（不顯示給使用者），維持不變以免通知重新註冊
 AUTHOR_EMAIL = "ncku2026tcsc@gmail.com"
 SENTINEL = "\x00__zfix__\x00"
 VK_LEFT, VK_RIGHT = 0x25, 0x27
@@ -680,17 +680,39 @@ class _App5(_App4):
         except Exception:
             pass
 
+    @staticmethod
+    def _ask_yesno(msg):
+        """Win32 是非框（YESNO＋警告＋搶到前景/置頂）。回傳 True=按了「是」。
+        關鍵：必須在『獨立執行緒』呼叫——同步在 pystray 選單回呼裡彈，會卡在選單的 modal loop、按鈕沒反應。"""
+        import ctypes
+        flags = 0x4 | 0x30 | 0x10000 | 0x40000   # YESNO | ICONWARNING | SETFOREGROUND | TOPMOST
+        return ctypes.windll.user32.MessageBoxW(0, msg, "刪除確認", flags) == 6
+
     def _remove_word(self, w):
+        threading.Thread(target=self._confirm_remove, args=(w,), daemon=True).start()
+
+    def _confirm_remove(self, w):
+        if not self._ask_yesno(f"確定要刪除自學詞「{w}」?"):
+            return
         userdict.remove(w)
         wordphon.reload_userforce()
         self._refresh_menu()
         self._notify(f"已移除自學詞「{w}」")
 
     def _clear_words(self):
-        n = userdict.clear()
+        threading.Thread(target=self._confirm_clear, daemon=True).start()
+
+    def _confirm_clear(self):
+        n = len(userdict.entries_by_word())
+        if not n:
+            self._notify("沒有自學詞可清除")
+            return
+        if not self._ask_yesno(f"確定要清除全部 {n} 個自學詞?（無法復原）"):
+            return
+        m = userdict.clear()
         wordphon.reload_userforce()
         self._refresh_menu()
-        self._notify(f"已清除 {n} 個自學詞")
+        self._notify(f"已清除 {m} 個自學詞")
 
 
 # ===== app_exe_v7 =====
@@ -798,22 +820,22 @@ class _App6(_App5):
         self._set_clip(saved)
         word = (sel or "").strip()
         if word == SENTINEL or not word:
-            self._notify("沒有反白到字（請先選取『正確的詞』再按 F3 學習）")
+            self._notify("沒有反白到字（請先選取『正確的詞』再按 F7 學習）")
             return
         if len(word) > 8:
             self._notify("選取太長，請只選一個詞（≤8 字）")
             return
-        status, tier, msg = userdict.learn(word)
+        status, level, msg = userdict.learn(word)
         if status == "nochar":
             self._notify(f"無法學「{word}」：{msg}")
             return
         wordphon.reload_userforce()
         self._refresh_menu()
         if status == "ok":
-            extra = "；單字較易誤套，建議連詞一起教" if len(word) == 1 else ""
-            self._notify(f"已學會「{word}」：建議等級（再按 F3 升級為強制）{extra}")
-        elif status == "upgraded":
-            self._notify(f"「{word}」升級為強制：同音打錯一定改成它")
+            cap = userdict.cap_for(word)
+            self._notify(f"已學「{word}」：強度 {level}/{cap}（再按 F7 加強，越高越容易贏）")
+        elif status == "maxed":
+            self._notify(f"「{word}」已是最高強度 {level}（再按也不會更強）")
         else:
             self._notify(f"「{word}」：{msg}")
 
@@ -861,13 +883,13 @@ class _App6(_App5):
         learned = userdict.entries_by_word()
         items = []
         if learned:
-            sub = [pystray.MenuItem(f"✕ {w}（{'強制' if t == 'hard' else '建議'}）",
+            sub = [pystray.MenuItem(f"✕ {w}（強度 {t}）",
                                     self._mk_remove(w)) for w, t in learned.items()]
             sub.append(pystray.Menu.SEPARATOR)
             sub.append(pystray.MenuItem("全部清除", lambda icon, item: self._clear_words()))
             items.append(pystray.MenuItem(f"管理我學的詞（{len(learned)}）", pystray.Menu(*sub)))
         else:
-            items.append(pystray.MenuItem("我學的詞：0（反白詞→按 F3 學習）",
+            items.append(pystray.MenuItem("我學的詞：0（反白詞→按 F7 學習）",
                                           None, enabled=False))
         items += [
             pystray.MenuItem("重新載入詞庫加權 (custom_boost.txt)", self._reload_boost),
@@ -888,7 +910,7 @@ PyInstaller 進入點（ZhuyinFix.spec）改指向本檔。
 """
 import time
 
-from csc import logbook, winkeys as wk, userdict, wordphon
+from csc import logbook, winkeys as wk, userdict, wordphon, editfmt
 
 
 class _App7(_App6):
@@ -938,22 +960,22 @@ class _App7(_App6):
         self._set_clip(saved)
         word = (sel or "").strip()
         if not word or word == SENTINEL:
-            self._notify("沒有反白到字（請先選取『正確的詞』再按 F3 學習）")
+            self._notify("沒有反白到字（請先選取『正確的詞』再按 F7 學習）")
             return
         if len(word) > 8:
             self._notify("選取太長，請只選一個詞（≤8 字）")
             return
-        status, tier, msg = userdict.learn(word)
+        status, level, msg = userdict.learn(word)            # 與 F9 同源：多段式，回傳目前等級
         if status == "nochar":
             self._notify(f"無法學「{word}」：{msg}")
             return
         wordphon.reload_userforce()
         self._refresh_menu()
-        if status == "ok":
-            extra = "；單字較易誤套，建議連詞一起教" if len(word) == 1 else ""
-            self._notify(f"已學會「{word}」：建議等級（再按 F3 升級為強制）{extra}")
-        elif status == "upgraded":
-            self._notify(f"「{word}」升級為強制：同音打錯一定改成它")
+        if status == "ok":                                   # 報等級（對齊 tray v20、與 F9 自動學一致）
+            cap = userdict.cap_for(word)
+            self._notify(f"已學「{word}」：強度 {level}/{cap}（再按 F7 加強，越高越容易贏）")
+        elif status == "maxed":
+            self._notify(f"「{word}」已是最高強度 {level}（再按也不會更強）")
         else:
             self._notify(f"「{word}」：{msg}")
 
@@ -963,7 +985,7 @@ class _App7(_App6):
         sel = self._grab_selection(is_console)
         if not sel or sel == SENTINEL or not sel.strip():
             self._set_clip(saved)
-            self._notify("沒有反白到文字（請先選取要修的字，再按 F4）")
+            self._notify("沒有反白到文字（請先選取要修的字，再按 F5）")
             return
         corrected = self._correct_selection_text(sel)
         if corrected == sel:
@@ -974,7 +996,7 @@ class _App7(_App6):
         logbook.log_correction(sel, corrected, changes, self.corrector.margin)
         self._last = (sel, corrected)
         self._cycle = None
-        edits = "、".join(f"{a}→{b}" for _, a, b in changes)
+        edits = editfmt.fmt_edits(changes)                # v2.3b：notify_group 開→相鄰黏一起；關→逐字（同舊）
         if is_console:
             self._set_clip(corrected)
             self._notify(f"已修正：{edits}（已複製，按 Ctrl+Shift+V 貼上取代）")
@@ -1007,7 +1029,7 @@ import time
 
 import pystray
 
-from csc import logbook, winkeys as wk, hotkey, textutil
+from csc import logbook, winkeys as wk, hotkey, textutil, editfmt
 
 ICON_PAUSE = _icon((200, 60, 60))            # 暫停＝紅（與 載入灰/就緒綠/忙黃 區別）
 _CON_F4 = "終端機/CLI 不能就地改字，請按 F6 開輸入框打字（框裡一樣 F1~F5 改字、Enter 送回）"
@@ -1075,6 +1097,8 @@ class _App8(_App7):
         return window
 
     def _replace_window(self, new_window):
+        # Windows 剪貼簿換行：放裸 \n 時很多 app 會把連續換行收合 → 統一成 \r\n 再貼，多行才完整保留
+        new_window = new_window.replace("\r\n", "\n").replace("\n", "\r\n")
         saved = self._get_clip()
         if not self._set_clip_confirm(new_window):
             self._set_clip(saved)
@@ -1086,6 +1110,7 @@ class _App8(_App7):
         self._set_clip(saved)
 
     def _paste_selection(self, text, reselect=True):
+        text = text.replace("\r\n", "\n").replace("\n", "\r\n")   # 多行選取貼回保留換行（同 _replace_window）
         saved = self._get_clip()
         if not self._set_clip_confirm(text):
             self._set_clip(saved)
@@ -1139,7 +1164,7 @@ class _App8(_App7):
             writer(best)
             changes = [(i, a, b) for i, (a, b) in enumerate(zip(target, best)) if a != b]
             logbook.log_correction(target, best, changes, self.corrector.margin)
-            edits = "、".join(f"{a}→{b}" for _, a, b in changes)
+            edits = editfmt.fmt_edits(changes)            # v2.3b：notify_group 開→相鄰黏一起；關→逐字（同舊）
             tag = "重算" if force else "已修正"
             self._notify(f"{tag}：{edits}（不滿意再按 {cyclekey} 換候選，共 {len(ranked)} 個）")
         elif force:
@@ -1178,7 +1203,7 @@ class _App8(_App7):
         sel = self._grab_selection(False)
         self._set_clip(saved)
         if not sel or sel == SENTINEL or not sel.strip():
-            self._notify("沒有反白到文字（請先選取要修的字，再按 F4）"); return None
+            self._notify("沒有反白到文字（請先選取要修的字，再按 F5）"); return None
         return sel, lambda new: self._paste_selection(new, reselect=True)
 
     # ---- 四個入口 ----
@@ -1189,8 +1214,9 @@ class _App8(_App7):
 
     def _do_recorrect(self):                  # F2：重算上一次那個鍵的目標（通用）
         cyc = self._cycle
-        if cyc and cyc.get("orig"):
-            self._auto_log_problem(cyc["orig"])      # 重算前記原題（此刻 orig 還是最初的字）
+        orig0 = cyc.get("orig") if cyc else None
+        if orig0:
+            self._auto_log_problem(orig0)            # 重算前記原題（此刻 orig 還是最初的字）
         if cyc and cyc.get("read_fn"):
             key = cyc.get("cyclekey", "F1")
             if _foreground_process() in _CONSOLES:
@@ -1200,6 +1226,9 @@ class _App8(_App7):
             if _foreground_process() in _CONSOLES:
                 self._notify(_CON_F4); return
             self._cycle_correct(self._read_unit, "unit", "F1", force=True)
+        if self._cycle and orig0:
+            # F2 重算後新 cycle 的 orig 會變成「上次結果」→ 保留真原題：dedup 只記一筆、input 正確、F3 還原回真原題
+            self._cycle["orig"] = orig0
 
     def _do_correct_window(self, n):          # F7
         if _foreground_process() in _CONSOLES:
@@ -1416,7 +1445,7 @@ class _App9(_App8):
 
         result = {"text": None}
         done_q = queue.Queue()
-        state = {"computing": False, "cycle": None}
+        state = {"computing": False, "cycle": None, "case": None}
 
         root = tk.Tk()
         root.title(f"{APP_TITLE} — 輸入框（F1 改字 · Enter 送出）")
@@ -1506,7 +1535,7 @@ class _App9(_App8):
                 except Exception:
                     s, start = "", 0
                 if not s.strip():
-                    status.config(text="（先用滑鼠/Shift 反白要修的字，再按 F4）", fg="#888")
+                    status.config(text="（先用滑鼠/Shift 反白要修的字，再按 F5）", fg="#888")
                     return None
                 return start, s
             if kind == "win":
@@ -1526,6 +1555,19 @@ class _App9(_App8):
             txt.delete(f"1.0+{start}c", f"1.0+{start + length}c")
             txt.insert(f"1.0+{start}c", text)
 
+        def box_again(result):
+            """框內再按一次（換候選/F2）：tries+1、更新最後答案；tries>=2 就 upsert(auto)。同一般流程。"""
+            cs = state.get("case")
+            if not cs:
+                return
+            cs["tries"] += 1
+            cs["last"] = result
+            if cs["tries"] >= 2:
+                try:
+                    logbook.upsert_error_case(cs["input"], cs["output"], cs["last"], "auto", cs["tries"])
+                except Exception:
+                    pass
+
         def box_run(kind, force=False):
             """F1/F4/F7/F2 共用引擎。kind: tail/sel/win；force(F2)＝重算上一次那個鍵的目標。"""
             if state["computing"]:
@@ -1541,6 +1583,7 @@ class _App9(_App8):
                 cyc["idx"] = (cyc["idx"] + 1) % len(cyc["list"])
                 nxt = cyc["list"][cyc["idx"]]
                 box_apply(start, len(target), nxt)
+                box_again(nxt)                                    # 換候選＝再試一次
                 if kind == "sel":
                     txt.tag_remove("sel", "1.0", "end")
                     txt.tag_add("sel", f"1.0+{start}c", f"1.0+{start + len(nxt)}c")
@@ -1571,7 +1614,8 @@ class _App9(_App8):
             if not cyc or "orig" not in cyc:
                 status.config(text="（沒有可還原的，先按 F1/F4/F5 改字）", fg="#888")
                 return
-            orig = cyc["orig"]
+            cs = state.get("case")
+            orig = (cs.get("input") if cs else None) or cyc["orig"]   # F3 還原回 raw 原輸入（非中間結果）
             box_apply(cyc["start"], cyc["len"], orig)
             if cyc.get("kind") == "sel":
                 txt.tag_remove("sel", "1.0", "end")
@@ -1615,6 +1659,14 @@ class _App9(_App8):
                     box_apply(start, len(target), best)
                     state["cycle"] = {"list": ranked, "idx": 0, "orig": target,
                                       "kind": cyckind, "start": start, "len": len(target)}
+                    if forced:
+                        box_again(best)                              # F2 重算＝再試一次（沿用同一筆 case）
+                    else:
+                        _o = state.get("case")                       # 換新句＝上一句定案 → both 模式才學
+                        if _o and not _o.get("done") and _o.get("tries", 0) >= 2 and self._learn_mode() == "both":
+                            self._maybe_auto_learn(_o["last"], wrong=_o["output"], src="auto")
+                        state["case"] = {"input": target, "output": best,
+                                         "last": best, "tries": 1, "done": False}   # 第一次＝開新 case
                     if cyckind == "sel":
                         txt.tag_remove("sel", "1.0", "end")
                         txt.tag_add("sel", f"1.0+{start}c", f"1.0+{start + len(best)}c")
@@ -1763,10 +1815,41 @@ class _App10(_App9):
         except Exception as e:
             self._notify(f"補正確答案失敗：{e}")
             return
+        if ok == "notfound":
+            self._notify(f"找不到對應原題（讀到的「{correct}」長度/讀音對不上任何難例），沒記。"
+                         "請把游標移回那句、只改同音錯字再按 F9")
+            return
         if ok:
-            self._notify(f"已把正確答案補進難例清單（gold）：{correct}")
+            self._notify(f"已把正確答案補進難例清單（gold）：{correct}" + self._maybe_auto_learn(correct))
         else:
             self._notify("難例清單沒有可補的紀錄")
+
+    def _maybe_auto_learn(self, correct, wrong=None, src="manual"):
+        """自動學詞：diff 模型改錯的(wrong) ↔ gold(correct)。回傳通知尾段。
+        模式 off→不學；manual→只有 F9(manual) 學；both→auto 記的也學。src 標來源。"""
+        from csc import settings
+        _m = settings.get("auto_learn")
+        mode = "manual" if _m is True else (_m if _m in ("both", "manual", "off") else "off")
+        if mode == "off" or (src == "auto" and mode != "both"):
+            return ""
+        from csc import userdict, wordphon
+        if wrong is None:
+            rec = logbook.case_matching(correct) or {}
+            wrong = rec.get("output") or rec.get("input") or ""
+        res = userdict.auto_learn_from_diff(wrong, correct)
+        up, down, pending = res["up"], res["down"], res["pending"]
+        if up or down:
+            wordphon.reload_userforce()
+        if up:                                          # 自動學常斷錯字 → 留最近的供「剛剛學的字」重挑
+            getattr(self, "_note_recent_learned", lambda x: None)([(w, c) for w, _lv, c in up])
+        parts = [f"{w}↑{lv}" for w, lv, _c in up] + [f"{w}↓{lv or '忘'}" for w, lv in down]
+        if pending:
+            self._queue_pending(pending)
+            parts.append(f"{len(pending)} 個新詞待確認（右鍵系統匣 → 待確認新詞）")
+        if not parts:
+            return ""
+        self._refresh_menu()
+        return "；自動學：" + "、".join(parts)
 
     # ---- 開啟難例清單：用記事本開（.jsonl 多半沒預設關聯）----
     def _open_errorlog(self, icon=None, item=None):
@@ -1855,7 +1938,7 @@ import time
 
 import pystray
 
-from csc import settings, winkeys as wk
+from csc import settings, winkeys as wk, pronoun
 
 
 class _App13(_App12):
@@ -1885,12 +1968,53 @@ class _App13(_App12):
                              checked=lambda item: bool(settings.get("auto_switch_ime"))),
             pystray.MenuItem("F6 自動按 Shift（切中文模式）", self._toggle_auto_shift,
                              checked=lambda item: bool(settings.get("auto_press_shift"))),
+            pystray.MenuItem("自動學詞", pystray.Menu(
+                pystray.MenuItem("auto＋manual(F9)（實驗）", lambda i, it: self._set_learn("both"),
+                                 checked=lambda item: self._learn_mode() == "both", radio=True),
+                pystray.MenuItem("僅 manual(F9)", lambda i, it: self._set_learn("manual"),
+                                 checked=lambda item: self._learn_mode() == "manual", radio=True),
+                pystray.MenuItem("關閉", lambda i, it: self._set_learn("off"),
+                                 checked=lambda item: self._learn_mode() == "off", radio=True),
+            )),
+            pystray.MenuItem("人稱用字（目標對象）", pystray.Menu(*self._pronoun_items())),
         ]
         return pystray.Menu(*(items[:-1] + ime_items + items[-1:]))
 
     def _toggle_auto_ime(self, icon=None, item=None):
         settings.set("auto_switch_ime", not settings.get("auto_switch_ime"))
         self._refresh_menu()
+
+    def _toggle_auto_learn(self, icon=None, item=None):
+        settings.set("auto_learn", not settings.get("auto_learn"))
+        self._refresh_menu()
+
+    # ---- 人稱用字：7 字分兩組，各勾一個（你/妳；他她它牠祂）----
+    def _pronoun_items(self):
+        items = [pystray.MenuItem("〔你／妳 擇一〕", None, enabled=False)]
+        for ch in pronoun.NI:
+            items.append(pystray.MenuItem(ch, self._mk_pronoun("pron_ni", ch),
+                         checked=lambda item, ch=ch: settings.get("pron_ni") == ch))
+        items.append(pystray.MenuItem("〔他她它牠祂 擇一〕", None, enabled=False))
+        for ch in pronoun.TA:
+            items.append(pystray.MenuItem(ch, self._mk_pronoun("pron_ta", ch),
+                         checked=lambda item, ch=ch: settings.get("pron_ta") == ch))
+        items.append(pystray.Menu.SEPARATOR)
+        items.append(pystray.MenuItem("✕ 都不指定", self._clear_pronoun))
+        return items
+
+    def _mk_pronoun(self, key, ch):
+        def toggle(icon=None, item=None):
+            settings.set(key, "" if settings.get(key) == ch else ch)   # 再點同字＝取消
+            self._refresh_menu()
+            self._notify(f"人稱用字：你→{settings.get('pron_ni') or '不指定'}、"
+                         f"他→{settings.get('pron_ta') or '不指定'}")
+        return toggle
+
+    def _clear_pronoun(self, icon=None, item=None):
+        settings.set("pron_ni", "")
+        settings.set("pron_ta", "")
+        self._refresh_menu()
+        self._notify("人稱用字：都不指定")
 
     def _toggle_auto_shift(self, icon=None, item=None):
         settings.set("auto_press_shift", not settings.get("auto_press_shift"))
@@ -2056,26 +2180,29 @@ class _App18(_App17):
                     pass
             self._notify(msg)
 
-        cyc = state.get("cycle") if state else None
-        if not cyc:
-            _say("框內還沒做過修正（先按 F1/F2 修、把字改對，再按 F10 記正確答案）", ok=False)
+        # 新 schema（同一般流程）：input=raw / output=第一次框F1 / tries；只有 manual(F9) 學。
+        cs = state.get("case") if state else None
+        if not cs or cs.get("tries", 0) < 2:
+            _say("框內第一次就改對的不記；先 F1 改、再按 F2／換候選，改對後再 F9", ok=False)
             return
-        # 全部讀同一份 state["cycle"]（統一引擎的唯一事實來源）：
-        problem = cyc.get("orig")                     # 題目＝這次被模型改的目標
-        cands = cyc.get("list") or []
-        output = cands[0] if cands else None          # 模型(可能錯)的修正＝best＝list[0]
-        gold = cands[cyc.get("idx", 0)] if cands else None   # 目前最後選到的候選＝我選定的正解
+        cyc = state.get("cycle") or {}
+        st, ln = cyc.get("start"), cyc.get("len")
+        if isinstance(st, int) and isinstance(ln, int) and 0 <= st <= len(text):
+            gold = text[st:st + ln]                       # 框內該段目前實際顯示＝我確認的正解
+        else:
+            gold = cs.get("last") or ""
         gold = (gold or "").strip()
         if not gold:
             _say("框內沒有可記錄的內容", ok=False)
             return
         try:
-            logbook.log_error_case(problem, output if output and output != problem else None)
-            logbook.append_correct_answer(gold)
+            logbook.upsert_error_case(cs["input"], cs["output"], gold, "manual", cs["tries"])
         except Exception as e:
             _say(f"記錄失敗：{e}", ok=False)
             return
-        _say(f"已記錄正確答案(gold)：{gold}")
+        msg = self._maybe_auto_learn(gold, wrong=cs["output"])
+        cs["done"] = True
+        _say(f"已記錄正解(gold,manual)：{gold}" + msg)
 
 
 # ===== app_exe_v20 =====
@@ -2122,7 +2249,8 @@ class _App19(_App18):
         before_idx = before["idx"] if before else None
         super()._cycle_correct(read_fn, kind, cyclekey, force)
         cyc = self._cycle
-        if cyc is before and before is not None and cyc.get("idx") != before_idx:
+        cycled = cyc is before and before is not None and cyc.get("idx") != before_idx
+        if cycled or (force and cyc and cyc.get("list")):        # 換候選、或 F2 重算 → 更新 gold(auto)
             self._autofill_gold()
 
     def _autofill_gold(self):
@@ -2133,7 +2261,7 @@ class _App19(_App18):
         if not (cyc and cyc.get("list")):
             return
         try:
-            logbook.append_correct_answer(cyc["list"][cyc.get("idx", 0)])
+            logbook.append_correct_answer(cyc["list"][cyc.get("idx", 0)], src="auto")  # 循環自動補 → auto
         except Exception:
             pass
 
@@ -2158,7 +2286,7 @@ from csc import crashlog, hotkey
 from csc.usage import USAGE_TEXT
 
 
-class TrayApp(_App19):
+class _App20(_App19):
     def start(self):
         self._box_q = None
         self._box_problem = None
@@ -2177,7 +2305,7 @@ class TrayApp(_App19):
         self.icon.run(setup=self._setup)
 
     def _load_model(self):
-        # 暫時靜音 super 的舊鍵位通知（避免啟動跳兩次），只留下面這條 v2.1 的
+        # 暫時靜音 super 的舊鍵位通知（避免啟動跳兩次），只留下面這條 v2.3 的
         _notify = self._notify
         self._notify = lambda *a, **k: None
         try:
@@ -2186,10 +2314,11 @@ class TrayApp(_App19):
             self._notify = _notify
         self.corrector.char_cand = 12
         self.corrector.word_cand = 10
+        self._wrap_pronoun_pref()                 # 人稱用字偏好：對每個候選強制換 你他→妳她/牠/祂
         self._set(ICON_READY, f"{APP_TITLE}：就緒（右鍵 → 使用說明）")
-        self._notify("就緒 v2.1： F1 改字 · F2 重算 · F3 還原 · F4 前30字 · F5 反白 · "
-                     "F6 框 · F7 學詞 · F9 記正解 · F10 關熱鍵\n"
-                     "（已縮到右下角系統匣，背景執行中；右鍵有使用說明）")
+        self._notify("就緒 v2.3（已縮到右下角系統匣，背景執行中；右鍵有使用說明）\n"
+                     " F1 改字 · F2 重算（迭代）· F3 還原 · F4 前30字 · F5 反白 · "
+                     "F6 框 · F7 學詞 · F9 記正解 · F10 關熱鍵")
 
     # ---- F3 還原回原字 ----
     def _on_restore(self):
@@ -2224,17 +2353,852 @@ class TrayApp(_App19):
             pass
         self._notify(f"已還原回原字：{cyc['orig']}")
 
-    # ---- tray 右鍵「使用說明」 ----
+    # ---- tray 右鍵「使用說明」+「待確認新詞」 ----
     def _build_menu(self):
         items = list(super()._build_menu())
-        help_item = pystray.MenuItem("使用說明", self._show_help)
-        return pystray.Menu(*([help_item, pystray.Menu.SEPARATOR] + items))
+        head = [pystray.MenuItem("使用說明", self._show_help)] + self._pending_menu_items()
+        return pystray.Menu(*(head + [pystray.Menu.SEPARATOR] + items))
+
+    def _refresh_menu(self):
+        # 覆寫 v38（只 update_menu 不重建）：結構會變的項目（待確認新詞、學詞計數）需重建選單才會即時反映。
+        try:
+            self.icon.menu = self._build_menu()
+            self.icon.update_menu()
+        except Exception:
+            pass
 
     def _show_help(self, icon=None, item=None):
         threading.Thread(
             target=lambda: ctypes.windll.user32.MessageBoxW(
                 0, USAGE_TEXT, f"{APP_TITLE} — 使用說明", 0x40),
             daemon=True).start()
+
+    # ---- 自動學詞：詞庫沒有的新詞 → 列候選讓使用者右鍵挑（挑中才存進 %APPDATA% userforce）----
+    def _queue_pending(self, pending):
+        cur = getattr(self, "_pending_words", None)
+        if cur is None:
+            cur = self._pending_words = []
+        for cands in pending:
+            if cands and list(cands) not in cur:
+                cur.append(list(cands))
+        del cur[:-8]   # 只留最近 8 組：不選＝不學，也不會堆積成一堆
+
+    def _pending_menu_items(self):
+        pend = getattr(self, "_pending_words", None)
+        if not pend:
+            return []
+        subs = []
+        for cands in pend:
+            for c in cands:
+                subs.append(pystray.MenuItem(c, self._mk_pick(cands, c)))
+            subs.append(pystray.MenuItem("✕ 都不學", self._mk_pick(cands, None)))
+            subs.append(pystray.Menu.SEPARATOR)
+        return [pystray.MenuItem(f"待確認新詞（{len(pend)}）", pystray.Menu(*subs))]
+
+    def _mk_pick(self, cands, word):
+        key = tuple(cands)
+        return lambda icon, item: self._pick_pending(key, word)
+
+    def _pick_pending(self, key, word):
+        pend = getattr(self, "_pending_words", [])
+        for i, c in enumerate(pend):
+            if tuple(c) == key:
+                del pend[i]
+                break
+        if word:
+            from csc import userdict, wordphon
+            _st, lv, _msg = userdict.learn(word)
+            wordphon.reload_userforce()
+            self._notify(f"已學「{word}」：強度 {lv}（待確認清單移除此項）")
+        else:
+            self._notify("已略過此新詞（不學）")
+        self._refresh_menu()
+
+    # ---- 人稱用字偏好：包一層 ranked_corrections，對每個候選強制換部首 ----
+    def _wrap_pronoun_pref(self):
+        from csc import settings, pronoun
+        orig = self.corrector.ranked_corrections
+
+        def wrapped(text, *a, **k):
+            ranked = orig(text, *a, **k)
+            ni, ta = settings.get("pron_ni"), settings.get("pron_ta")
+            if not ni and not ta:
+                return ranked
+            out, seen = [], set()
+            for c in ranked:                       # 偏好版優先（預設套用）
+                m = pronoun.apply_pref(c, ni, ta)
+                if m not in seen:
+                    seen.add(m)
+                    out.append(m)
+            for c in ranked:                       # 再附原版，F1 可循環回去（多人句可救回）
+                if c not in seen:
+                    seen.add(c)
+                    out.append(c)
+            return out
+        self.corrector.ranked_corrections = wrapped
+
+
+# ===== app_exe_v22 =====
+# -*- coding: utf-8 -*-
+"""繁中自動選字 — 獨立 exe 進入點 v22 = v21 + v2.3b（追平日常版 v46）：
+
+改字通知「合併顯示」開關（實驗）：把『位置相鄰』的改動黏成一段、不相鄰的仍分開。
+  關（預設，＝v2.3a）：勿→物、鞭→鞕
+  開：              勿鞭→物鞕；勿鞭→物鞕、客→刻
+
+字串格式化抽到 csc/editfmt.fmt_edits()，由設定 notify_group 決定（旗標關＝逐位元同舊）；
+統一引擎 app_exe_v9._cycle_correct + 終端機 F4（app_exe_v8）那兩處改呼叫 editfmt。
+本檔只負責：右鍵加開關 + 版本字串改 v2.3b。設定存 %APPDATA%\\tcsc\\settings.json，
+預設關（release 不含此檔 → 公眾吃預設關）。PyInstaller 進入點（ZhuyinFix.spec）改指向本檔。
+"""
+import gc
+
+import pystray
+
+from csc import crashlog, settings
+
+
+class _App21(_App20):
+    def _load_model(self):
+        # 靜音 v21 的「就緒 v2.3」那條（v21 內部已先靜音它的 super），改報 v2.3b
+        _notify = self._notify
+        self._notify = lambda *a, **k: None
+        try:
+            super()._load_model()
+        finally:
+            self._notify = _notify
+        self._notify("就緒 v2.3b（新增：通知合併顯示，右鍵可切換）\n"
+                     " F1 改字 · F2 重算 · F3 還原 · F4 前30字 · F5 反白 · "
+                     "F6 框 · F7 學詞 · F9 記正解 · F10 關熱鍵")
+
+    def _build_menu(self):
+        base_items = list(super()._build_menu())
+        toggle = pystray.MenuItem(
+            "通知合併顯示：相鄰改動黏成一段（預設開）", self._toggle_notify_group,
+            checked=lambda item: bool(settings.get("notify_group")))
+        return pystray.Menu(toggle, pystray.Menu.SEPARATOR, *base_items)
+
+    def _toggle_notify_group(self, icon=None, item=None):
+        settings.set("notify_group", not settings.get("notify_group"))
+        on = settings.get("notify_group")
+        self._notify("通知合併顯示：開（相鄰改動黏成一段，如 勿鞭→物鞕）" if on
+                     else "通知合併顯示：關（恢復逐字：勿→物、鞭→鞕）")
+        self._refresh_menu()
+
+
+# ===== app_exe_v23 =====
+# -*- coding: utf-8 -*-
+"""繁中自動選字 — 獨立 exe 進入點 v23 = v22 + v2.31（追平日常版 v47）：
+
+抓欄位文字失敗時自動重抓一次（第二次也失敗才報「沒抓到文字」）。`_grab_window()` 第一次回
+None 就稍等再抓一次，仍 None 才交給上層通知（_read_unit/_read_win 的訊息不變、只在重抓也失敗才跳）。
+單點覆寫即涵蓋 F1/F2（_read_unit）與 F4 前30字（_read_win）。
+
+v2.31 另含（不在本檔）：通知合併顯示改預設開（csc/settings.py）、F7 學詞通知對齊 F9 報等級
+（app_exe_v8._do_learn_word：F3→F7、印『強度 level/cap』）。本檔只負責重抓 + 版本字串。
+PyInstaller 進入點（ZhuyinFix.spec）改指向本檔。
+"""
+import gc
+import time
+
+from csc import crashlog
+
+
+class _App22(_App21):
+    def _grab_window(self):
+        w = super()._grab_window()
+        if w is None:                 # 第一次沒抓到 → 給前景/剪貼簿一點時間，再抓一次
+            time.sleep(0.12)
+            w = super()._grab_window()
+        return w
+
+    def _load_model(self):
+        _notify = self._notify
+        self._notify = lambda *a, **k: None      # 靜音 v22 的「就緒 v2.3b」，改報 v2.31
+        try:
+            super()._load_model()
+        finally:
+            self._notify = _notify
+        self._notify("就緒 v2.31（抓不到字會自動重試一次；通知合併顯示預設開，右鍵可關）\n"
+                     " F1 改字 · F2 重算 · F3 還原 · F4 前30字 · F5 反白 · "
+                     "F6 框 · F7 學詞 · F9 記正解 · F10 關熱鍵")
+
+
+# ===== app_exe_v24 =====
+# -*- coding: utf-8 -*-
+"""繁中自動選字 — 獨立 exe 進入點 v24 = v23 + v2.32（追平日常版 v48）：
+
+根治『校正後貼上偶爾貼到舊剪貼簿內容』的讀取端競態（v22 只修了寫入端）。Ctrl+V 後不立刻還原，
+讓校正後的新內容在剪貼簿多留 ~0.8s（慢的程式也讀得到正確內容），再背景還原使用者剪貼簿；配
+世代守衛，連續校正不互相蓋、還原的是使用者真正的原內容。貼上前再 reconfirm 一次。實作在
+csc/clipsafe；F1/F2/F4/F5 都走 _replace_window/_paste_selection，一次修好；F6 框不碰系統剪貼簿。
+PyInstaller 進入點（ZhuyinFix.spec）改指向本檔。
+"""
+import gc
+import time
+
+from csc import crashlog, winkeys as wk, textutil, clipsafe
+
+
+class _App23(_App22):
+    def _replace_window(self, new_window):
+        new_window = new_window.replace("\r\n", "\n").replace("\n", "\r\n")
+        if not clipsafe.begin_paste(self, new_window):
+            raise RuntimeError("剪貼簿被佔用，沒貼成功，請再按一次 F1")
+        wk.select_left(GRAB_CHARS)
+        time.sleep(0.05)
+        clipsafe.reconfirm(self, new_window)     # 貼上前再確認剪貼簿沒被蓋掉
+        wk.combo(wk.VK_CONTROL, wk.VK_V)
+        time.sleep(0.12)                         # 短 settle；新內容留在剪貼簿，由延遲還原顧讀取端
+        clipsafe.end_paste(self)
+
+    def _paste_selection(self, text, reselect=True):
+        text = text.replace("\r\n", "\n").replace("\n", "\r\n")
+        if not clipsafe.begin_paste(self, text):
+            raise RuntimeError("剪貼簿被佔用，沒貼成功，請再按一次 F5")
+        clipsafe.reconfirm(self, text)
+        wk.combo(wk.VK_CONTROL, wk.VK_V)
+        time.sleep(0.12)
+        if reselect:
+            wk.select_left(textutil.utf16_len(text))
+        clipsafe.end_paste(self)
+
+    def _load_model(self):
+        _notify = self._notify
+        self._notify = lambda *a, **k: None      # 靜音 v23 的「就緒 v2.31」，改報 v2.32
+        try:
+            super()._load_model()
+        finally:
+            self._notify = _notify
+        self._notify("就緒 v2.32（修好『貼上偶爾貼到舊內容』；抓不到字會重試；通知合併顯示）\n"
+                     " F1 改字 · F2 重算 · F3 還原 · F4 前30字 · F5 反白 · "
+                     "F6 框 · F7 學詞 · F9 記正解 · F10 關熱鍵")
+
+
+# ===== app_exe_v25 =====
+# -*- coding: utf-8 -*-
+"""繁中自動選字 — 獨立 exe 進入點 v25 = v24 + v2.33（實驗，追平日常版 v49）：
+
+改字「直接打字」——不經剪貼簿、根除貼上競態。選好取代區域後用 SendInput Unicode（wk.type_text，
+繞過注音 IME、F6 框已在用）把校正後的字直接打進去（送什麼就是什麼、零剪貼簿足跡）。
+動到核心、屬實驗：開關 `direct_type`（系統匣切換），**預設關**（公眾走證實穩的 v2.32 剪貼簿路徑），
+即時可退回。**有換行**（聊天室 Enter 會誤送）→ 自動退回剪貼簿路徑。只改『寫回』，抓字仍用剪貼簿讀取。
+PyInstaller 進入點（ZhuyinFix.spec）改指向本檔。
+"""
+import gc
+import time
+
+import pystray
+
+from csc import crashlog, winkeys as wk, textutil, settings
+
+
+class _App24(_App23):
+    @staticmethod
+    def _can_type(t):
+        return bool(settings.get("direct_type")) and t and "\n" not in t and "\r" not in t
+
+    def _replace_window(self, new_window):
+        if self._can_type(new_window):
+            wk.select_left(GRAB_CHARS)        # 反白與抓取相同格數（打字會取代選取）
+            time.sleep(0.04)                  # 等選取落地再打字
+            wk.type_text(new_window)          # 直接打字、完全不碰剪貼簿
+            return
+        super()._replace_window(new_window)   # 有換行/開關關 → v2.32 安全剪貼簿路徑
+
+    def _paste_selection(self, text, reselect=True):
+        if self._can_type(text):
+            wk.type_text(text)
+            if reselect:
+                wk.select_left(textutil.utf16_len(text))   # 重新反白供循環（同剪貼簿路徑）
+            return
+        super()._paste_selection(text, reselect)
+
+    def _build_menu(self):
+        base_items = list(super()._build_menu())
+        toggle = pystray.MenuItem(
+            "直接打字（實驗）：不經剪貼簿、根除貼上競態", self._toggle_direct_type,
+            checked=lambda item: bool(settings.get("direct_type")))
+        return pystray.Menu(toggle, pystray.Menu.SEPARATOR, *base_items)
+
+    def _toggle_direct_type(self, icon=None, item=None):
+        settings.set("direct_type", not settings.get("direct_type"))
+        on = settings.get("direct_type")
+        self._notify("直接打字：開（改字直接打進去、不碰剪貼簿；有換行仍走剪貼簿）" if on
+                     else "直接打字：關（改回 v2.32 剪貼簿貼上）")
+        self._refresh_menu()
+
+    def _load_model(self):
+        _notify = self._notify
+        self._notify = lambda *a, **k: None      # 靜音 v24 的「就緒 v2.32」，改報 v2.33
+        try:
+            super()._load_model()
+        finally:
+            self._notify = _notify
+        self._notify("就緒 v2.33（實驗：改字可直接打字、不經剪貼簿，右鍵切換）\n"
+                     " F1 改字 · F2 重算 · F3 還原 · F4 前30字 · F5 反白 · "
+                     "F6 框 · F7 學詞 · F9 記正解 · F10 關熱鍵")
+
+
+# ===== app_exe_v26 =====
+# -*- coding: utf-8 -*-
+"""繁中自動選字 — 獨立 exe 進入點 v26 = v25 + v2.4 大改版（追平日常版 v50）：
+
+改字「貼上方式」二選一，預設模式1：
+  模式1（預設）＝一律直接打字（SendInput Unicode、繞注音 IME、完全不碰剪貼簿）——含多行：
+    換行正規化成 \\n 直接打入（Unicode 換行不會像 Enter 鍵那樣誤送訊息）。
+  模式2          ＝一律剪貼簿貼上（v2.32 延遲還原+世代守衛安全路徑，相容性最高）。
+承 v2.33 但改成乾淨二選一（v2.33 是單行打字/多行剪貼簿的混合，模式不純粹）。設定 `direct_type`
+（True=模式1）存 %APPDATA%；某 app 多行壓成一行/打不進去 → 系統匣切模式2。只改寫回，抓字仍用剪貼簿。
+PyInstaller 進入點（ZhuyinFix.spec）改指向本檔。
+"""
+import gc
+import time
+
+import pystray
+
+from csc import crashlog, winkeys as wk, textutil, settings
+
+
+class _App25(_App24):
+    def _replace_window(self, new_window):
+        if settings.get("direct_type"):
+            text = new_window.replace("\r\n", "\n").replace("\r", "\n")   # 打字用乾淨 \n
+            wk.select_left(GRAB_CHARS)
+            time.sleep(0.04)
+            wk.type_text(text)                # 直接打字、完全不碰剪貼簿（含多行）
+            return
+        super()._replace_window(new_window)   # 模式2：剪貼簿（v25→v24 clipsafe）
+
+    def _paste_selection(self, text, reselect=True):
+        if settings.get("direct_type"):
+            t = text.replace("\r\n", "\n").replace("\r", "\n")
+            wk.type_text(t)
+            if reselect:
+                wk.select_left(textutil.utf16_len(t))
+            return
+        super()._paste_selection(text, reselect)
+
+    def _build_menu(self):
+        # super(app_exe_v25,...)：跳過 v25 的單一開關層，接 v22 的選單（含通知合併開關等）
+        base_items = list(super(_App24, self)._build_menu())
+        mode = pystray.MenuItem("改字方式（貼上模式）", pystray.Menu(
+            pystray.MenuItem("模式①　直接打字（不經剪貼簿，預設）",
+                             lambda i, it: self._set_direct(True),
+                             checked=lambda item: bool(settings.get("direct_type")), radio=True),
+            pystray.MenuItem("模式②　剪貼簿貼上（相容性高）",
+                             lambda i, it: self._set_direct(False),
+                             checked=lambda item: not bool(settings.get("direct_type")), radio=True),
+        ))
+        return pystray.Menu(mode, pystray.Menu.SEPARATOR, *base_items)
+
+    def _set_direct(self, on):
+        settings.set("direct_type", bool(on))
+        self._notify("改字方式 → 模式①直接打字（不經剪貼簿、含多行）" if on
+                     else "改字方式 → 模式②剪貼簿貼上（相容性高）")
+        self._refresh_menu()
+
+    def _load_model(self):
+        _notify = self._notify
+        self._notify = lambda *a, **k: None      # 靜音 v25 的「就緒 v2.33」，改報 v2.4
+        try:
+            super()._load_model()
+        finally:
+            self._notify = _notify
+        self._notify("就緒 v2.4（改字方式可選：模式①直接打字／模式②剪貼簿，右鍵切換）\n"
+                     " F1 改字 · F2 重算 · F3 還原 · F4 前30字 · F5 反白 · "
+                     "F6 框 · F7 學詞 · F9 記正解 · F10 關熱鍵")
+
+
+# ===== app_exe_v27 =====
+# -*- coding: utf-8 -*-
+"""繁中自動選字 — 獨立 exe 進入點 v27 = v26 + v2.41（追平日常版 v51）：
+
+模式順序對調＋預設改剪貼簿＋新增「清空剪貼簿」。實測「直接打字」用 Unicode 注入吞換行（多行壓成
+一行）→ 不適合當預設。所以：預設改回剪貼簿（相容、支援換行）且排第一（①）；直接打字排第二（②）並
+標註「不支援換行」（單行情境想完全不碰剪貼簿的進階選項）；新增「清空剪貼簿（卡住時用）」手動救援。
+設定 `direct_type`（False=剪貼簿，預設）。只改選單與預設；兩條寫回路徑沿用 v26。
+PyInstaller 進入點（ZhuyinFix.spec）改指向本檔。
+"""
+import gc
+
+import pystray
+
+from csc import crashlog, settings
+
+
+class _App26(_App25):
+    def _build_menu(self):
+        # super(base25,...)：跳過 v26 的舊順序模式選單與 v25 的單一開關，接 v22 選單（含通知合併）
+        base_items = list(super(_App24, self)._build_menu())
+        mode = pystray.MenuItem("改字方式（貼上模式）", pystray.Menu(
+            pystray.MenuItem("模式①　剪貼簿貼上（相容、支援換行，預設）",
+                             lambda i, it: self._set_direct(False),
+                             checked=lambda item: not bool(settings.get("direct_type")), radio=True),
+            pystray.MenuItem("模式②　直接打字（不經剪貼簿，不支援換行）",
+                             lambda i, it: self._set_direct(True),
+                             checked=lambda item: bool(settings.get("direct_type")), radio=True),
+        ))
+        clearclip = pystray.MenuItem("清空剪貼簿（卡住時用）", self._clear_clipboard)
+        return pystray.Menu(mode, clearclip, pystray.Menu.SEPARATOR, *base_items)
+
+    def _set_direct(self, on):
+        settings.set("direct_type", bool(on))
+        self._notify("改字方式 → 直接打字（不經剪貼簿；注意：不支援換行）" if on
+                     else "改字方式 → 剪貼簿貼上（相容、支援換行，預設）")
+        self._refresh_menu()
+
+    def _clear_clipboard(self, icon=None, item=None):
+        try:
+            self._set_clip("")
+            self._notify("已清空剪貼簿（若剛剛貼上卡到怪內容，這樣可即時救援）")
+        except Exception as e:
+            self._notify(f"清空剪貼簿失敗：{e}")
+
+    def _load_model(self):
+        _notify = self._notify
+        self._notify = lambda *a, **k: None      # 靜音 v26 的「就緒 v2.4」，改報 v2.41
+        try:
+            super()._load_model()
+        finally:
+            self._notify = _notify
+        self._notify("就緒 v2.41（改字預設剪貼簿；可切「直接打字」不經剪貼簿但不支援換行；可清空剪貼簿）\n"
+                     " F1 改字 · F2 重算 · F3 還原 · F4 前30字 · F5 反白 · "
+                     "F6 框 · F7 學詞 · F9 記正解 · F10 關熱鍵")
+
+
+# ===== app_exe_v28 =====
+# -*- coding: utf-8 -*-
+"""繁中自動選字 — 獨立 exe 進入點 v28 = v27 + v2.5（追平日常版 v52）：
+
+直接打字模式的換行改用 **Shift+Enter（軟換行）** → 兩個模式都完整支援多行。寫回時把文字依 \\n 切段、
+逐段 type_text，段與段之間送一次 Shift+Enter（多數編輯器/聊天室當軟換行、不會送出訊息）。
+選單拿掉「不支援換行」標註；「清空剪貼簿」改名「改字怪怪的？點我清空剪貼簿」；使用說明加「卡住了？」段
+（csc/usage.py，共用）。兩模式都保留、預設仍剪貼簿（相容性最高）。
+PyInstaller 進入點（ZhuyinFix.spec）改指向本檔。
+"""
+import gc
+import time
+
+import pystray
+
+from csc import crashlog, winkeys as wk, textutil, settings
+
+
+VK_RETURN = 0x0D
+
+
+class _App27(_App26):
+    def _type_keep_newlines(self, text):
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        for k, seg in enumerate(text.split("\n")):
+            if k:
+                wk.combo(wk.VK_SHIFT, VK_RETURN)     # 軟換行：Shift+Enter（多數 app 不會送出）
+                time.sleep(0.01)
+            if seg:
+                wk.type_text(seg)
+
+    def _replace_window(self, new_window):
+        if settings.get("direct_type"):
+            wk.select_left(GRAB_CHARS)
+            time.sleep(0.04)
+            self._type_keep_newlines(new_window)
+            return
+        super()._replace_window(new_window)          # 模式①→ v26→v24 剪貼簿
+
+    def _paste_selection(self, text, reselect=True):
+        if settings.get("direct_type"):
+            self._type_keep_newlines(text)
+            if reselect:
+                wk.select_left(textutil.utf16_len(text.replace("\r\n", "\n").replace("\r", "\n")))
+            return
+        super()._paste_selection(text, reselect)
+
+    def _build_menu(self):
+        base_items = list(super(_App24, self)._build_menu())   # 跳過 v27/v26 的舊模式選單層
+        mode = pystray.MenuItem("改字方式（貼上模式）", pystray.Menu(
+            pystray.MenuItem("模式①　剪貼簿貼上（相容，預設）",
+                             lambda i, it: self._set_direct(False),
+                             checked=lambda item: not bool(settings.get("direct_type")), radio=True),
+            pystray.MenuItem("模式②　直接打字（不經剪貼簿、換行用 Shift+Enter）",
+                             lambda i, it: self._set_direct(True),
+                             checked=lambda item: bool(settings.get("direct_type")), radio=True),
+        ))
+        clearclip = pystray.MenuItem("改字怪怪的？點我清空剪貼簿", self._clear_clipboard)
+        return pystray.Menu(mode, clearclip, pystray.Menu.SEPARATOR, *base_items)
+
+    def _set_direct(self, on):
+        settings.set("direct_type", bool(on))
+        self._notify("改字方式 → 直接打字（不經剪貼簿、換行用 Shift+Enter）" if on
+                     else "改字方式 → 剪貼簿貼上（相容、支援換行，預設）")
+        self._refresh_menu()
+
+    def _load_model(self):
+        _notify = self._notify
+        self._notify = lambda *a, **k: None          # 靜音 v27 的「就緒 v2.41」，改報 v2.5
+        try:
+            super()._load_model()
+        finally:
+            self._notify = _notify
+        self._notify("就緒 v2.5（兩種改字方式：剪貼簿／直接打字，皆支援換行；右鍵可切換、可清空剪貼簿）\n"
+                     " F1 改字 · F2 重算 · F3 還原 · F4 前30字 · F5 反白 · "
+                     "F6 框 · F7 學詞 · F9 記正解 · F10 關熱鍵")
+
+
+# ===== app_exe_v29 =====
+# -*- coding: utf-8 -*-
+"""繁中自動選字 — 獨立 exe 進入點 v29 = v28 + v2.51 小修（追平日常版 v53）：
+
+就緒通知簡潔化（不提兩種改字模式，使用者不必知道）。配合 APP_TITLE 拿掉版本號（app_exe.py，
+通知標題/tooltip/說明標題共用）→ 通知標題不再卡在舊版本。其餘（Shift+Enter 換行、模式選單、
+清空剪貼簿、卡住了？說明）皆沿用 v28。PyInstaller 進入點（ZhuyinFix.spec）改指向本檔。
+"""
+import gc
+
+from csc import crashlog
+
+
+class _App28(_App27):
+    def _load_model(self):
+        _notify = self._notify
+        self._notify = lambda *a, **k: None      # 靜音 v28 的就緒通知，改報簡潔版
+        try:
+            super()._load_model()
+        finally:
+            self._notify = _notify
+        self._notify("就緒（已在背景執行，右鍵有使用說明）\n"
+                     " F1 改字 · F2 重算 · F3 還原 · F4 前30字 · F5 反白 · "
+                     "F6 框 · F7 學詞 · F9 記正解 · F10 關熱鍵")
+
+
+# ===== app_exe_v30 =====
+# -*- coding: utf-8 -*-
+"""繁中自動選字 — 獨立 exe 進入點 v30 = v29 + v2.52（追平日常版 v54）：
+
+修「模式②直接打字遇多行越換越多行」：直接打字是「選游標前 50 格→重打整段」，多行時選取格數
+（換行算 1 格）和抓回字串長度（換行＝\\r\\n 兩字元）對不齊 → 行數累加。修法：**模式②只在單行打字**
+（快、不碰剪貼簿）；**多行自動走剪貼簿**（v2.32 clipsafe 原子取代、可靠）。模式①本就走剪貼簿、支援多行。
+版本號改由 csc/version.py 單一來源帶進 APP_TITLE（app_exe.py），標題不再卡舊版本。
+PyInstaller 進入點（ZhuyinFix.spec）改指向本檔。
+"""
+import gc
+import time
+
+import pystray
+
+from csc import crashlog, winkeys as wk, textutil, settings
+
+
+class _App29(_App28):
+    @staticmethod
+    def _has_nl(t):
+        return ("\n" in t) or ("\r" in t)
+
+    def _replace_window(self, new_window):
+        if settings.get("direct_type") and new_window and not self._has_nl(new_window):
+            wk.select_left(GRAB_CHARS)            # 單行直接打字、完全不碰剪貼簿
+            time.sleep(0.04)
+            wk.type_text(new_window)
+            return
+        _App23._replace_window(self, new_window)   # 多行/模式①→ clipsafe 剪貼簿（原子取代、可靠）
+
+    def _paste_selection(self, text, reselect=True):
+        if settings.get("direct_type") and text and not self._has_nl(text):
+            wk.type_text(text)
+            if reselect:
+                wk.select_left(textutil.utf16_len(text))
+            return
+        _App23._paste_selection(self, text, reselect)
+
+    def _build_menu(self):
+        base_items = list(super(_App24, self)._build_menu())   # 跳過各舊版模式選單層，接 v22（含通知合併）
+        mode = pystray.MenuItem("改字方式（貼上模式）", pystray.Menu(
+            pystray.MenuItem("模式①　剪貼簿貼上（相容，預設）",
+                             lambda i, it: self._set_direct(False),
+                             checked=lambda item: not bool(settings.get("direct_type")), radio=True),
+            pystray.MenuItem("模式②　直接打字（不經剪貼簿）",
+                             lambda i, it: self._set_direct(True),
+                             checked=lambda item: bool(settings.get("direct_type")), radio=True),
+        ))
+        clearclip = pystray.MenuItem("改字怪怪的？點我清空剪貼簿", self._clear_clipboard)
+        return pystray.Menu(mode, clearclip, pystray.Menu.SEPARATOR, *base_items)
+
+    def _set_direct(self, on):
+        settings.set("direct_type", bool(on))
+        self._notify("改字方式 → 直接打字（不經剪貼簿；多行會自動改用剪貼簿）" if on
+                     else "改字方式 → 剪貼簿貼上（相容、支援換行，預設）")
+        self._refresh_menu()
+
+
+# ===== app_exe_v31 =====
+# -*- coding: utf-8 -*-
+"""繁中自動選字 — 獨立 exe 進入點 v31 = v30 + v2.53（追平日常版 v55）：
+
+(A) F1/F2 直接打字支援多行：_read_unit 改成只重打『被改的那段 unit+tail』（在最後一個分隔符／換行
+    之後、不含換行、等長 → 選取精準、不碰前面行與換行）。F4/F5 抓的範圍可能跨行，維持 v30。
+(B) 「剛剛學的字」選單（照抄「待確認新詞」批准選單）：自動學常斷錯字，保留最近 2 個自動學到的詞＋
+    候選，可在系統匣重挑正確斷詞或移除。候選由 userdict.auto_learn_from_diff 的 up 帶出。
+PyInstaller 進入點（ZhuyinFix.spec）改指向本檔。
+"""
+import gc
+import time
+
+import pystray
+
+from csc import crashlog, winkeys as wk, textutil, settings
+
+
+class _App30(_App29):
+    # ===== (A) F1/F2 直接打字：只重打 break-free 的 unit+tail =====
+    def _read_unit(self):
+        if not settings.get("direct_type"):
+            return super()._read_unit()
+        time.sleep(0.08)
+        window = self._grab_window()
+        if window is None:
+            self._notify("沒抓到文字（換個輸入欄試試）"); return None
+        unit, tail = textutil.split_tail_unit(window)
+        if not unit.strip():
+            self._notify("沒抓到要修的句子"); return None
+        return unit, lambda new: self._type_replace(unit + tail, new + tail)
+
+    def _type_replace(self, old, new):
+        wk.select_left(textutil.utf16_len(old))   # 選「被改的那段」（break-free、等長 → 精準）
+        time.sleep(0.04)
+        wk.type_text(new)
+
+    # ===== (B) 剛剛學的字（照抄「待確認新詞」批准選單）=====
+    def _note_recent_learned(self, pairs):
+        cur = getattr(self, "_recent_learned", None)
+        if cur is None:
+            cur = self._recent_learned = []
+        for w, cands in pairs:
+            cur[:] = [(x, c) for (x, c) in cur if x != w]
+            cur.append((w, list(cands)))
+        del cur[:-2]
+
+    def _recent_menu_items(self):
+        rec = getattr(self, "_recent_learned", None)
+        if not rec:
+            return []
+        subs = []
+        for word, cands in rec:
+            opts = [word] + [c for c in cands if c != word]
+            for c in opts:
+                subs.append(pystray.MenuItem(("✓ " if c == word else "　") + c,
+                                             self._mk_repick(word, c)))
+            subs.append(pystray.MenuItem("✕ 移除（剛剛學錯了）", self._mk_repick(word, None)))
+            subs.append(pystray.Menu.SEPARATOR)
+        return [pystray.MenuItem(f"剛剛學的字（{len(rec)}）", pystray.Menu(*subs))]
+
+    def _mk_repick(self, learned, choice):
+        return lambda icon, item: self._repick_learned(learned, choice)
+
+    def _repick_learned(self, learned, choice):
+        from csc import userdict, wordphon
+        rec = getattr(self, "_recent_learned", [])
+        if choice == learned:
+            self._notify(f"「{learned}」維持不變"); return
+        userdict.remove(learned)
+        if choice:
+            _st, lv, _msg = userdict.learn(choice)
+            msg = f"已改學「{choice}」（強度 {lv}）、移除「{learned}」"
+        else:
+            msg = f"已移除剛剛學的「{learned}」"
+        wordphon.reload_userforce()
+        self._recent_learned[:] = [(w, c) for (w, c) in rec if w != learned]
+        self._notify(msg)
+        self._refresh_menu()
+
+    # ===== 選單 =====
+    def _build_menu(self):
+        base_items = list(super(_App24, self)._build_menu())   # 跳過各舊版模式選單層，接 v22
+        mode = pystray.MenuItem("改字方式（貼上模式）", pystray.Menu(
+            pystray.MenuItem("模式①　剪貼簿貼上（相容，預設）",
+                             lambda i, it: self._set_direct(False),
+                             checked=lambda item: not bool(settings.get("direct_type")), radio=True),
+            pystray.MenuItem("模式②　直接打字（不經剪貼簿）",
+                             lambda i, it: self._set_direct(True),
+                             checked=lambda item: bool(settings.get("direct_type")), radio=True),
+        ))
+        clearclip = pystray.MenuItem("改字怪怪的？點我清空剪貼簿", self._clear_clipboard)
+        recent = self._recent_menu_items()
+        return pystray.Menu(mode, clearclip, *recent, pystray.Menu.SEPARATOR, *base_items)
+
+    def _set_direct(self, on):
+        settings.set("direct_type", bool(on))
+        self._notify("改字方式 → 直接打字（不經剪貼簿）" if on
+                     else "改字方式 → 剪貼簿貼上（相容、支援換行，預設）")
+        self._refresh_menu()
+
+
+# ===== app_exe_v32 =====
+# -*- coding: utf-8 -*-
+"""繁中自動選字 — 獨立 exe 進入點 v32 = v31 + v2.54（追平日常版 v56）：
+
+F1/F2 多行修好（兩種模式）——只取代「被改的那段」unit+tail（最後一個分隔符之後、break-free、與校正
+等長），`select_left(utf16_len(unit+tail))` 精準選那段，再用目前模式打字或剪貼簿貼上 new+tail，
+完全不碰前面的行與換行。病根：抓取拿不到換行時 prefix 變空，但寫回 select_left(50) 往回多選了前面
+幾行、貼上單行內容 → 壓成一行；只取代被改那段即可避開（兩模式皆安全）。F4/F5 抓的範圍跨行，維持原樣。
+PyInstaller 進入點（ZhuyinFix.spec）改指向本檔。
+"""
+import gc
+import time
+
+from csc import crashlog, winkeys as wk, textutil, settings
+
+
+class TrayApp(_App30):
+    def _read_unit(self):
+        time.sleep(0.08)
+        window = self._grab_window()
+        if window is None:
+            self._notify("沒抓到文字（換個輸入欄試試）"); return None
+        unit, tail = textutil.split_tail_unit(window)
+        if not unit.strip():
+            self._notify("沒抓到要修的句子"); return None
+        return unit, lambda new: self._write_unit(unit + tail, new + tail)
+
+    def _write_unit(self, old, new):
+        wk.select_left(textutil.utf16_len(old))
+        time.sleep(0.04)
+        if settings.get("direct_type"):
+            wk.type_text(new)                                            # 模式②直接打字
+        else:
+            _App23._paste_selection(self, new, reselect=False)   # 模式①剪貼簿（只貼這段）
+
+    # ===== v2.6 難例紀錄大改：input=raw / output=第一次F1 / gold(auto=最後 · manual=F9) / tries =====
+    # F1/F2/F4/F5 全走 _cycle_correct；用記憶體 self._case 顯式追蹤，tries>=2 才寫檔，只有 manual 學。
+    def _case_finalize(self):
+        """收尾上一筆：both 模式才把它的最終答案(last)拿去學一次（approach 1：不在中途學）。"""
+        old = getattr(self, "_case", None)
+        if old and not old.get("done") and old.get("tries", 0) >= 2 and self._learn_mode() == "both":
+            self._maybe_auto_learn(old["last"], wrong=old["output"], src="auto")
+        self._case = None
+
+    def _case_first(self, raw, result):
+        """第一次 F1/F4/F5：先結算上一筆，再開新 case；先不寫檔（要 tries>=2）。"""
+        self._case_finalize()                                  # 換新句＝上一句定案 → both 模式才學
+        self._case = {"input": raw, "output": result, "last": result, "tries": 1, "done": False}
+
+    def _case_again(self, result):
+        """再按一次（換候選 / F2）：tries+1、更新最後答案；達 2 次就 upsert(auto)。不在這裡學（approach 1）。"""
+        c = getattr(self, "_case", None)
+        if not c:
+            return
+        c["tries"] += 1
+        c["last"] = result
+        if c["tries"] >= 2:
+            try:
+                logbook.upsert_error_case(c["input"], c["output"], c["last"], "auto", c["tries"])
+            except Exception:
+                pass
+
+    @staticmethod
+    def _learn_mode():
+        """自動學詞模式：'both'(auto+manual,實驗) / 'manual'(僅F9) / 'off'。相容舊 bool（True→manual）。"""
+        m = settings.get("auto_learn")
+        return "manual" if m is True else (m if m in ("both", "manual", "off") else "off")
+
+    def _set_learn(self, mode):
+        settings.set("auto_learn", mode)
+        self._notify({"both": "自動學詞：auto＋manual(F9)（實驗，連 auto 記的也學）",
+                      "manual": "自動學詞：僅 manual(F9)",
+                      "off": "自動學詞：關閉"}.get(mode, mode))
+        self._refresh_menu()
+
+    def _cycle_correct(self, read_fn, kind, cyclekey, force=False):
+        got = read_fn()
+        if got is None:
+            return
+        target, writer = got
+        cyc = self._cycle
+        if not force and cyc and cyc.get("kind") == kind and target == cyc["list"][cyc["idx"]]:
+            cyc["idx"] = (cyc["idx"] + 1) % len(cyc["list"])
+            nxt = cyc["list"][cyc["idx"]]
+            writer(nxt)
+            self._last = (cyc["orig"], nxt)
+            self._case_again(nxt)                         # 換候選＝再試一次
+            if nxt == cyc["orig"]:
+                self._notify("已還原為原句")
+            return
+        ranked = self.corrector.ranked_corrections(target)
+        best = ranked[0]
+        self._cycle = {"list": ranked, "idx": 0, "orig": target, "kind": kind,
+                       "read_fn": read_fn, "cyclekey": cyclekey}
+        self._last = (target, best)
+        if force:
+            self._case_again(best)                        # F2 重算＝再試一次（沿用同一筆 case）
+        else:
+            self._case_first(target, best)                # 第一次 F1/F4/F5＝開新 case
+        if best != target:
+            writer(best)
+            changes = [(i, a, b) for i, (a, b) in enumerate(zip(target, best)) if a != b]
+            logbook.log_correction(target, best, changes, self.corrector.margin)
+            edits = editfmt.fmt_edits(changes)
+            tag = "重算" if force else "已修正"
+            self._notify(f"{tag}：{edits}（不滿意再按 {cyclekey} 換候選，共 {len(ranked)} 個）")
+        elif force:
+            self._notify(f"目前沒有可再修的同音字：{target}")
+        elif len(ranked) > 1:
+            self._notify(f"未發現需修正（再按 {cyclekey} 看其他候選，共 {len(ranked)} 個）")
+        else:
+            self._cycle = None
+            self._notify(f"未發現需修正的同音字：{target}")
+
+    def _do_recorrect(self):                  # F2：重算（不再用舊 _auto_log_problem，case 追蹤在 _cycle_correct）
+        cyc = self._cycle
+        orig0 = cyc.get("orig") if cyc else None
+        rf = (cyc.get("read_fn") if cyc else None)
+        if _foreground_process() in _CONSOLES:
+            self._notify(_CON_F4); return
+        self._cycle_correct(rf or self._read_unit, (cyc.get("kind") if cyc else "unit"),
+                            (cyc.get("cyclekey") if cyc else "F1"), force=True)
+        if self._cycle and orig0:
+            self._cycle["orig"] = orig0           # 保留真原題給 F3 還原
+
+    def _do_record_correct(self):             # F9：補 gold(manual) + 觸發學習（只有這裡學）
+        c = getattr(self, "_case", None)
+        if not c or c.get("tries", 0) < 2:
+            self._notify("還沒有可補的難例（第一次 F1 就改對的不記；先 F1 改、再按 F2／換候選）")
+            return
+        cyc = self._cycle
+        read_fn = cyc.get("read_fn") if cyc else None
+        got = (read_fn or self._read_unit)()      # 重讀目前欄位＝我確認的正解
+        if got is None:
+            return
+        correct = got[0]
+        try:
+            logbook.upsert_error_case(c["input"], c["output"], correct, "manual", c["tries"])
+        except Exception as e:
+            self._notify(f"補正解失敗：{e}"); return
+        msg = self._maybe_auto_learn(correct, wrong=c["output"])   # manual：依模式學
+        c["done"] = True                          # 已 manual 處理 → 換句結算不再 auto 重學
+        self._notify(f"已補正解（manual）：{correct}" + msg)
+
+    def _do_restore(self):                    # F3：還原回「raw 原輸入」（優先用 _case["input"]，非 F2前/中間F1）
+        c = getattr(self, "_case", None)
+        cyc = self._cycle
+        raw = (c.get("input") if c else None) or (cyc.get("orig") if cyc else None)
+        if not raw:
+            self._notify("沒有可還原的（先按 F1/F4/F5 改字，再按 F3 還原回原字）")
+            return
+        read_fn = cyc.get("read_fn") if cyc else None
+        got = (read_fn or self._read_unit)()
+        if got is None:
+            return
+        _t, writer = got
+        try:
+            writer(raw)
+        except Exception as e:
+            self._notify(f"還原失敗：{e}"); return
+        self._last = (raw, raw)
+        if cyc and cyc.get("list"):
+            try:
+                cyc["idx"] = cyc["list"].index(raw)
+            except (ValueError, KeyError, TypeError):
+                pass
+        self._notify(f"已還原回原字：{raw}")
 
 
 def main():

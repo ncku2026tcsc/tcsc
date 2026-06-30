@@ -18,11 +18,24 @@ import os
 _DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 _MAP = os.path.join(_DIR, "BPMFMappings.txt")
 _OCC = os.path.join(_DIR, "phrase.occ")
-_USER = os.path.join(_DIR, "userwords.txt")   # 使用者造詞（高優先）
+from .userpaths import userforce_path, userwords_path
+_USER = userwords_path()          # 使用者造詞（高優先）；放 %APPDATA%（exe）/專案 data（原始碼）
 _USERWORD_FREQ = 2000
-_USERFORCE = os.path.join(_DIR, "userforce.txt")   # F2 自學詞（兩段式）
-_SOFT_FREQ = 3000              # soft：中高先驗（通常贏、BERT 仍可翻盤）
-_HARD_FREQ = 1_000_000_000     # hard：凌駕（log≈20.7，蓋過 BERT 流暢度）
+_USERFORCE = userforce_path()     # F7 自學詞（多段式）
+_UF_BASE = 3000                   # 第 1 段詞頻加成
+_UF_MULT = 8                      # 每加一段 ×8（log 約 +2.08 分）
+
+
+def _uf_level(field: str) -> int:
+    """欄位 → 段數（舊格式 soft→1、hard→6）。"""
+    if field == "soft":
+        return 1
+    if field == "hard":
+        return 6
+    try:
+        return max(1, min(6, int(field)))
+    except (ValueError, TypeError):
+        return 1
 
 _word2seqs: dict = {}   # 詞 -> {注音序列 tuple}
 _seq2words: dict = {}   # 注音序列 tuple -> [詞]
@@ -101,7 +114,7 @@ def _apply_userforce() -> None:
                 lst.remove(word)
             lst.insert(0, word)                 # 自學詞排最前
             _uf_pool.append((word, seq))
-            add = _HARD_FREQ if tier == "hard" else _SOFT_FREQ
+            add = int(_UF_BASE * (_UF_MULT ** (_uf_level(tier) - 1)))   # 段數 → 幾何加分
             _userforce_freq[word] = max(_userforce_freq.get(word, 0), add)
 
 

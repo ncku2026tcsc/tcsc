@@ -16,7 +16,8 @@ import sys
 import threading
 import traceback
 
-_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
+from .userpaths import logs_dir
+_DIR = logs_dir()   # exe → %APPDATA%\tcsc\logs；原始碼 → 專案 logs/
 _FILE = os.path.join(_DIR, "crash.log")
 _fh = None
 _lock = threading.Lock()

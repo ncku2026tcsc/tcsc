@@ -16,7 +16,8 @@ import datetime
 import json
 import os
 
-LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
+from .userpaths import logs_dir
+LOG_DIR = logs_dir()   # exe → %APPDATA%\tcsc\logs；原始碼 → 專案 logs/（重建不洗掉）
 LOG_FILE = os.path.join(LOG_DIR, "history.jsonl")
 ERROR_FILE = os.path.join(LOG_DIR, "error_cases.jsonl")
 
@@ -80,22 +81,103 @@ def log_error_case(problem: str, wrong: str = None) -> None:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
-def append_correct_answer(correct: str) -> bool:
-    """把『正確答案』補進 error_cases.jsonl **最後一筆**的 `gold` 欄。
-    流程：自動記下失敗案例(input + 模型錯誤 output)後，使用者手動改對，再用這個補上 gold，
-    湊成 (input, output, gold) 的完整難例——(input→gold) 即微調訓練對。
-    重複呼叫＝覆寫更新 gold（讓使用者可再修正答案）。
-    回傳 True=已補上；False=沒有可補的紀錄（檔案不存在或全空）。"""
+def upsert_error_case(inp, output, gold, gold_src, tries):
+    """寫入/更新一筆難例（新版 schema）。以 input **完全相符**往回找最近一筆：找到→更新、無→新增。
+    欄位：input(原 raw 輸入)、output(**第一次 F1 的結果**，永不變)、gold(正解)、
+          gold_src("auto"=模型最後答案／"manual"=F9 手動)、tries(F1/F2/F4/F5 按了幾次)。
+    規則：tries>=2 才寫（第一次 F1 就改對的不記）；只有 manual 觸發學習（在呼叫端）。"""
+    os.makedirs(LOG_DIR, exist_ok=True)
+    lines = open(ERROR_FILE, encoding="utf-8").readlines() if os.path.exists(ERROR_FILE) else []
+    rec = {"ts": datetime.datetime.now().isoformat(timespec="seconds"),
+           "input": inp, "output": output, "gold": gold, "gold_src": gold_src, "tries": tries}
+    idx = None
+    for i in range(len(lines) - 1, -1, -1):
+        try:
+            if json.loads(lines[i]).get("input") == inp:
+                idx = i
+                break
+        except Exception:
+            continue
+    line = json.dumps(rec, ensure_ascii=False) + "\n"
+    if idx is not None:
+        lines[idx] = line
+    else:
+        lines.append(line)
+    with open(ERROR_FILE, "w", encoding="utf-8") as f:
+        f.writelines(lines)
+
+
+def last_error_case():
+    """回傳 error_cases.jsonl 最後一筆 dict（含 input/output/gold），無則 None。供自動學詞 diff 用。"""
+    if not os.path.exists(ERROR_FILE):
+        return None
+    try:
+        with open(ERROR_FILE, "r", encoding="utf-8") as f:
+            lines = [ln for ln in f if ln.strip()]
+        return json.loads(lines[-1]) if lines else None
+    except Exception:
+        return None
+
+
+def case_matching(gold: str):
+    """回傳『input 與此 gold 同長度+同音』的最近一筆 dict（即 append_correct_answer 會寫進去的那筆），
+    無則 None。供自動學詞對齊同一筆的 output（而非盲讀最後一筆）。"""
+    if not os.path.exists(ERROR_FILE):
+        return None
+    try:
+        with open(ERROR_FILE, "r", encoding="utf-8") as f:
+            lines = [ln for ln in f if ln.strip()]
+    except Exception:
+        return None
+    for ln in reversed(lines):
+        try:
+            rec = json.loads(ln)
+        except Exception:
+            continue
+        if gold_matches(gold, rec.get("input", "")):
+            return rec
+    return None
+
+
+def gold_matches(gold: str, src: str) -> bool:
+    """gold 是否對得上 src：**只看同長度**。
+    為何不過濾讀音：一個字本就有多種讀音、讀音資料也未必齊全，逐字比同音會誤殺真正的修正
+    （例：乏 ㄈㄚˊ vs 發 ㄈㄚ 被當不同音，但使用者就是要改成「發」）。
+    長度才是關鍵防呆：長度不同＝不是同一句的逐字修正（多半是改寫/移到別句）→ 拒，避免寫進不相干紀錄。"""
+    gold = (gold or "").strip()
+    src = (src or "").strip()
+    return bool(gold) and bool(src) and len(gold) == len(src)
+
+
+def append_correct_answer(correct: str, src: str = "manual"):
+    """把『正確答案』補進對應的難例：**往回找 input 與此 gold 同長度+同音的那一筆**，補上 `gold`。
+    為何用搜尋而非「最後一筆」：F9 補 gold 是重讀游標處的字，若你已改寫/移到別句，最後一筆未必對得上；
+    用 (input↔gold 同音) 找正確對象，長度不符者一律跳過 → **絕不會把別句的 gold 寫進不相干的紀錄**。
+    重複按＝覆寫更新該筆 gold。
+    src：gold 來源標註，寫進 `gold_src` 欄——"manual"=使用者按 F9 自己補；"auto"=自動補（之後做）。
+        用途：之後拿 error_cases 當訓練資料時，可區分人工驗證(高可信)與自動產生(低可信)的 gold。
+    回傳 True=已補上；False=檔案空/不存在；"notfound"=找不到長度相符的同音原題（防呆，不寫、不亂建）。"""
     if not os.path.exists(ERROR_FILE):
         return False
     with open(ERROR_FILE, "r", encoding="utf-8") as f:
         lines = f.readlines()
-    idx = next((i for i in range(len(lines) - 1, -1, -1) if lines[i].strip()), None)
-    if idx is None:
-        return False
-    rec = json.loads(lines[idx])
-    rec["gold"] = correct                       # 重複按就覆寫更新 gold
-    lines[idx] = json.dumps(rec, ensure_ascii=False) + "\n"
+    target = None
+    for i in range(len(lines) - 1, -1, -1):          # 往回找最近一筆「同長度+同音」的原題
+        if not lines[i].strip():
+            continue
+        try:
+            rec = json.loads(lines[i])
+        except Exception:
+            continue
+        if gold_matches(correct, rec.get("input", "")):
+            target = i
+            break
+    if target is None:
+        return "notfound"                            # 長度不符/對不上 → 一律不寫
+    rec = json.loads(lines[target])
+    rec["gold"] = correct                            # 重複按就覆寫更新 gold
+    rec["gold_src"] = src                            # 標 gold 來源：manual / auto
+    lines[target] = json.dumps(rec, ensure_ascii=False) + "\n"
     with open(ERROR_FILE, "w", encoding="utf-8") as f:
         f.writelines(lines)
     return True
