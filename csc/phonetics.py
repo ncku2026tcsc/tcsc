@@ -65,12 +65,20 @@ def same_sound(a: str, b: str) -> bool:
 
 
 def homophones(ch: str, limit: int = 12) -> list:
-    """回傳某字的同音候選字（純繁體、同聲調、依頻率），不含自身。"""
+    """回傳某字的同音候選字（純繁體、同聲調、依頻率），不含自身。
+    多音字：各讀音的候選**依頻率位次交錯合併**，而不是把某個讀音的字全倒完（連罕見字）才輪到
+    下一個讀音——否則多音字『另一個讀音的常用字』會被前一個讀音的罕見字擠出上限而消失。
+    例：玩＝ㄨㄢˋ＋ㄨㄢˊ，舊法把 ㄨㄢˋ 的罕見字(卍/翫/忨…)排在『完』(ㄨㄢˊ 常用)前面 → 完落到 13 名被砍。"""
     _load()
-    seen, out = {ch}, []
+    scored = []
     for r in readings(ch):
-        for c in _reading2chars.get(r, []):
-            if c not in seen:
-                seen.add(c)
-                out.append(c)
+        for i, c in enumerate(_reading2chars.get(r, [])):   # i＝該讀音內的頻率位次（小＝常用）
+            if c != ch:
+                scored.append((i, c))
+    scored.sort(key=lambda x: x[0])                          # 各讀音的常用字交錯排前面
+    seen, out = {ch}, []
+    for _i, c in scored:
+        if c not in seen:
+            seen.add(c)
+            out.append(c)
     return out[:limit]

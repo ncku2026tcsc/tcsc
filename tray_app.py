@@ -849,21 +849,9 @@ class _App8(_App7):
         else:
             self._notify(f"「{word}」：{msg}")
 
-    # ---- 系統匣：管理我學的詞 ----
+    # ---- 系統匣：管理我學的詞（舊階層式子選單，已被 v2.68+ 的視窗取代；此層現為死碼保留）----
     def _build_menu(self):
-        learned = userdict.entries_by_word()
-        items = []
-        if learned:
-            sub = [pystray.MenuItem(
-                f"✕ {w}（{'強制' if t == 'hard' else '建議'}）",
-                lambda icon, it, w=w: self._remove_word(w)) for w, t in learned.items()]
-            sub.append(pystray.Menu.SEPARATOR)
-            sub.append(pystray.MenuItem("全部清除", lambda icon, it: self._clear_words()))
-            items.append(pystray.MenuItem(f"管理我學的詞（{len(learned)}）", pystray.Menu(*sub)))
-        else:
-            items.append(pystray.MenuItem("我學的詞：0（反白詞→按 F2 學習）",
-                                          None, enabled=False))
-        items += [
+        items = [
             pystray.MenuItem("重新載入詞庫加權 (custom_boost.txt)", self._reload_boost),
             pystray.MenuItem(f"聯繫作者：{AUTHOR_EMAIL}", self._contact),
             pystray.MenuItem("離開", self._quit),
@@ -1080,18 +1068,8 @@ class _App9(_App8):
         return lambda icon, item: self._remove_word(w)
 
     def _build_menu(self):
-        learned = userdict.entries_by_word()
-        items = []
-        if learned:
-            sub = [pystray.MenuItem(f"✕ {w}（強度 {t}）",
-                                    self._mk_remove(w)) for w, t in learned.items()]
-            sub.append(pystray.Menu.SEPARATOR)
-            sub.append(pystray.MenuItem("全部清除", lambda icon, item: self._clear_words()))
-            items.append(pystray.MenuItem(f"管理我學的詞（{len(learned)}）", pystray.Menu(*sub)))
-        else:
-            items.append(pystray.MenuItem("我學的詞：0（反白詞→按 F7 學習）",
-                                          None, enabled=False))
-        items += [
+        # 舊「管理我學的詞」階層式子選單已移除（改用系統匣的「管理我學的詞…」視窗，見最終層 _on_manage）。
+        items = [
             pystray.MenuItem("重新載入詞庫加權 (custom_boost.txt)", self._reload_boost),
             pystray.MenuItem(f"聯繫作者：{AUTHOR_EMAIL}", self._contact),
             pystray.MenuItem("離開", self._quit),
@@ -1374,7 +1352,7 @@ class _App11(_App10):
 
         result = {"text": None}
         done_q = queue.Queue()                        # 背景算完的結果回傳
-        state = {"computing": False, "cycle": None, "case": None}   # cycle/case = 校正/難例狀態
+        state = {"computing": False, "cycle": None}   # cycle = {"list", "idx", "orig"}
 
         root = tk.Tk()
         root.title(f"{APP_TITLE} — 輸入框（F1 改字 · Enter 送出）")
@@ -1461,46 +1439,38 @@ class _App11(_App10):
         def box_region(kind):
             """取『目前該 kind 的目標』→ (start_字元位移, target_文字)；取不到回 None 並提示。"""
             win = box_text()
+
+            def _off(index):                                     # 字元位移；count 距離為 0 時 tkinter 回 None
+                c = txt.count("1.0", index, "chars")
+                return (c[0] if isinstance(c, (tuple, list)) else c) or 0
+
             if kind == "sel":
                 try:
                     s = txt.get("sel.first", "sel.last")
-                    c = txt.count("1.0", "sel.first", "chars")
-                    start = c[0] if isinstance(c, (tuple, list)) else int(c)
                 except Exception:
-                    s, start = "", 0
+                    s = ""
                 if not s.strip():
                     status.config(text="（先用滑鼠/Shift 反白要修的字，再按 F5）", fg="#888")
                     return None
-                return start, s
+                return _off("sel.first"), s                      # 反白含第 0 字時 count 回 None → _off 補 0（修首字反白改不了）
             if kind == "win":
                 chunk = win[-30:]
                 if not chunk.strip():
                     status.config(text="（先打字…）", fg="#888")
                     return None
                 return len(win) - len(chunk), chunk
-            unit, tl = textutil.split_tail_unit(win)              # tail
+            cur = _off("insert")                                 # tail(F1)：依游標前的文字決定範圍（與一般模式一致，不再只改最尾）
+            base = win[:cur] if cur else win                     # 游標在最前 → 退回全文（等同沒移游標）
+            unit, tl = textutil.split_tail_unit(base)
             if not unit.strip():
                 status.config(text="（先打字…）", fg="#888")
                 return None
-            return len(win) - len(unit) - len(tl), unit
+            return len(base) - len(unit) - len(tl), unit
 
         def box_apply(start, length, text):
             """以 text 取代 [start, start+length) 字元（候選同長→offset 穩定、保留其餘標記）。"""
             txt.delete(f"1.0+{start}c", f"1.0+{start + length}c")
             txt.insert(f"1.0+{start}c", text)
-
-        def box_again(result):
-            """框內再按一次（換候選/F2）：tries+1、更新最後答案；tries>=2 就 upsert(auto)。不在中途學。"""
-            cs = state.get("case")
-            if not cs:
-                return
-            cs["tries"] += 1
-            cs["last"] = result
-            if cs["tries"] >= 2:
-                try:
-                    logbook.upsert_error_case(cs["input"], cs["output"], cs["last"], "auto", cs["tries"])
-                except Exception:
-                    pass
 
         def box_run(kind, force=False):
             """F1/F4/F7/F2 共用引擎。kind: tail/sel/win；force(F2)＝重算上一次那個鍵的目標。"""
@@ -1518,7 +1488,6 @@ class _App11(_App10):
                 cyc["idx"] = (cyc["idx"] + 1) % len(cyc["list"])
                 nxt = cyc["list"][cyc["idx"]]
                 box_apply(start, len(target), nxt)
-                box_again(nxt)                                    # 換候選＝再試一次
                 if kind == "sel":                                 # 反白循環：保持反白該段
                     txt.tag_remove("sel", "1.0", "end")
                     txt.tag_add("sel", f"1.0+{start}c", f"1.0+{start + len(nxt)}c")
@@ -1550,8 +1519,7 @@ class _App11(_App10):
             if not cyc or "orig" not in cyc:
                 status.config(text="（沒有可還原的，先按 F1/F4/F5 改字）", fg="#888")
                 return
-            cs = state.get("case")
-            orig = (cs.get("input") if cs else None) or cyc["orig"]   # F3 還原回 raw 原輸入
+            orig = cyc["orig"]
             box_apply(cyc["start"], cyc["len"], orig)
             if cyc.get("kind") == "sel":
                 txt.tag_remove("sel", "1.0", "end")
@@ -1597,14 +1565,6 @@ class _App11(_App10):
                     box_apply(start, len(target), best)
                     state["cycle"] = {"list": ranked, "idx": 0, "orig": target,
                                       "kind": cyckind, "start": start, "len": len(target)}
-                    if forced:
-                        box_again(best)
-                    else:
-                        _o = state.get("case")                       # 換新句＝上一句定案 → both 模式才學
-                        if _o and not _o.get("done") and _o.get("tries", 0) >= 2 and self._learn_mode() == "both":
-                            self._maybe_auto_learn(_o["last"], wrong=_o["output"], src="auto")
-                        state["case"] = {"input": target, "output": best,
-                                         "last": best, "tries": 1, "done": False}
                     if cyckind == "sel":               # 反白：保持反白該段，方便再按換候選
                         txt.tag_remove("sel", "1.0", "end")
                         txt.tag_add("sel", f"1.0+{start}c", f"1.0+{start + len(best)}c")
@@ -2584,12 +2544,11 @@ class _App24(_App23):
         else:
             self._notify("難例清單沒有可補的紀錄")
 
-    def _maybe_auto_learn(self, correct, wrong=None, src="manual"):
-        """自動學詞：diff(wrong↔correct)。off→不學；manual→只有 F9 學；both→auto 記的也學。"""
+    def _maybe_auto_learn(self, correct, wrong=None):
+        """實驗：自動學詞開啟時，diff 模型改錯的(wrong) ↔ gold(correct)。回傳通知尾段。
+        wrong 省略 → 自 error_cases 取最後一筆 output/input（一般欄用）；F6 框直接傳入。"""
         from csc import settings
-        _m = settings.get("auto_learn")
-        mode = "manual" if _m is True else (_m if _m in ("both", "manual", "off") else "off")
-        if mode == "off" or (src == "auto" and mode != "both"):
+        if not settings.get("auto_learn"):
             return ""
         from csc import userdict, wordphon
         if wrong is None:
@@ -2736,14 +2695,8 @@ class _App28(_App27):
                              checked=lambda item: bool(settings.get("auto_switch_ime"))),
             pystray.MenuItem("F6 自動按 Shift（切中文模式）", self._toggle_auto_shift,
                              checked=lambda item: bool(settings.get("auto_press_shift"))),
-            pystray.MenuItem("自動學詞", pystray.Menu(
-                pystray.MenuItem("auto＋manual(F9)（實驗）", lambda i, it: self._set_learn("both"),
-                                 checked=lambda item: self._learn_mode() == "both", radio=True),
-                pystray.MenuItem("僅 manual(F9)", lambda i, it: self._set_learn("manual"),
-                                 checked=lambda item: self._learn_mode() == "manual", radio=True),
-                pystray.MenuItem("關閉", lambda i, it: self._set_learn("off"),
-                                 checked=lambda item: self._learn_mode() == "off", radio=True),
-            )),
+            pystray.MenuItem("自動學詞（實驗）：F9 補正解時學差異詞", self._toggle_auto_learn,
+                             checked=lambda item: bool(settings.get("auto_learn"))),
             pystray.MenuItem("人稱用字（目標對象）", pystray.Menu(*self._pronoun_items())),
         ]
         # 插在最後一項（離開）之前，讓「離開」維持在最底
@@ -2958,29 +2911,35 @@ class _App33(_App32):
                     pass
             self._notify(msg)
 
-        # 新 schema（同一般流程）：input=raw / output=第一次框F1 / tries；只有 manual(F9) 學。
-        cs = state.get("case") if state else None
-        if not cs or cs.get("tries", 0) < 2:
-            _say("框內第一次就改對的不記；先 F1 改、再按 F2／換候選，改對後再 F9", ok=False)
+        cyc = state.get("cycle") if state else None
+        if not cyc:
+            _say("框內還沒做過修正（先按 F1/F2 修、把字改對，再按 F10 記正確答案）", ok=False)
             return
-        cyc = state.get("cycle") or {}
+        # 全部讀同一份 state["cycle"]（統一引擎的唯一事實來源）：
+        problem = cyc.get("orig")                     # 題目＝這次被模型改的目標
+        cands = cyc.get("list") or []
+        output = cands[0] if cands else None          # 模型(可能錯)的修正＝best＝list[0]
+        # gold＝框內該段「目前實際顯示」的字（循環選的、或你手動打字改的，都抓得到；
+        # 比 list[idx] 穩——手動改或 best=原字時 list[idx] 會誤記成原字/題目）
         st, ln = cyc.get("start"), cyc.get("len")
         if isinstance(st, int) and isinstance(ln, int) and 0 <= st <= len(text):
-            gold = text[st:st + ln]                       # 框內該段目前實際顯示＝我確認的正解
+            gold = text[st:st + ln]
         else:
-            gold = cs.get("last") or ""
+            gold = cands[cyc.get("idx", 0)] if cands else ""
         gold = (gold or "").strip()
         if not gold:
             _say("框內沒有可記錄的內容", ok=False)
             return
         try:
-            logbook.upsert_error_case(cs["input"], cs["output"], gold, "manual", cs["tries"])
+            logbook.log_error_case(problem, output if output and output != problem else None)
+            ok = logbook.append_correct_answer(gold)
         except Exception as e:
             _say(f"記錄失敗：{e}", ok=False)
             return
-        msg = self._maybe_auto_learn(gold, wrong=cs["output"])
-        cs["done"] = True
-        _say(f"已記錄正解(gold,manual)：{gold}" + msg)
+        if ok == "notfound":
+            _say("框內這段和原題對不上（長度/讀音），沒記", ok=False)
+            return
+        _say(f"已記錄正確答案(gold)：{gold}" + self._maybe_auto_learn(gold, wrong=output or problem))
 
 
 # ===== tray_app_v44 =====
@@ -3086,6 +3045,7 @@ class _App35(_App34):
             hotkey.VK_F5: self._on_f3,            # 只改反白（原 F4，handler 名 _on_f3）
             hotkey.VK_F6: self._on_f6,            # 開輸入框
             hotkey.VK_F7: self._on_f2_learn,      # 學習反白詞（原 F3）
+            hotkey.VK_F8: self._on_f8,            # 還原我剛剛複製的內容到剪貼簿
             hotkey.VK_F9: self._on_logerror,      # 更新 error cases / 補 gold（原 F10）
             hotkey.VK_F10: self._on_f9_pause,     # 關閉/恢復熱鍵（原 F9）
         }, keep_vks=(hotkey.VK_F10,))             # 暫停時保留關熱鍵的鍵，才能再開
@@ -3144,7 +3104,7 @@ class _App35(_App34):
     # ---- tray 右鍵「使用說明」（Win32 訊息框，無 Tk）+「待確認新詞」----
     def _build_menu(self):
         items = list(super()._build_menu())
-        head = [pystray.MenuItem("使用說明", self._show_help)] + self._pending_menu_items()
+        head = [pystray.MenuItem("使用說明", self._show_help)]   # 待確認新詞移到上層（排在剛剛學之前）
         return pystray.Menu(*(head + [pystray.Menu.SEPARATOR] + items))
 
     def _refresh_menu(self):
@@ -3793,7 +3753,7 @@ class _App45(_App44):
         for w, cands in pairs:
             cur[:] = [(x, c) for (x, c) in cur if x != w]   # 同詞去重
             cur.append((w, list(cands)))
-        del cur[:-2]
+        del cur[:-8]                                     # 留最近 8 個（對齊待確認新詞）
 
     def _recent_menu_items(self):
         rec = getattr(self, "_recent_learned", None)
@@ -3840,8 +3800,24 @@ class _App45(_App44):
                              checked=lambda item: bool(settings.get("direct_type")), radio=True),
         ))
         clearclip = pystray.MenuItem("改字怪怪的？點我清空剪貼簿", self._clear_clipboard)
-        recent = self._recent_menu_items()
-        return pystray.Menu(mode, clearclip, *recent, pystray.Menu.SEPARATOR, *base)
+        autoclear = pystray.MenuItem("改字後自動清空剪貼簿", self._toggle_auto_clear,
+                                     checked=lambda item: bool(settings.get("auto_clear_clip")))
+        try:
+            _nw = len(userdict.entries_by_word())
+        except Exception:
+            _nw = 0
+        manage = pystray.MenuItem(f"管理我學的詞…（共 {_nw}）", self._on_manage)
+        pending = self._pending_menu_items()      # 待確認新詞（排在剛剛學之上）
+        recent = self._recent_menu_items()        # 剛剛學的字
+        return pystray.Menu(mode, clearclip, autoclear, manage,
+                            *pending, *recent, pystray.Menu.SEPARATOR, *base)
+
+    def _toggle_auto_clear(self, icon=None, item=None):
+        on = not settings.get("auto_clear_clip")
+        settings.set("auto_clear_clip", on)
+        self._notify("改字後自動清空剪貼簿：開（改完不還原你的剪貼簿、直接清空）" if on
+                     else "改字後自動清空剪貼簿：關（改回還原你原本的剪貼簿，預設）")
+        self._refresh_menu()
 
     def _set_direct(self, on):
         settings.set("direct_type", bool(on))
@@ -3884,138 +3860,59 @@ class TrayApp(_App45):
         """只取代『被改的那段』(break-free、等長 → 選取精準、不碰前面行與換行)；模式①剪貼簿/模式②打字。"""
         wk.select_left(textutil.utf16_len(old))
         time.sleep(0.04)
-        if settings.get("direct_type"):
-            wk.type_text(new)                                            # 模式②直接打字
+        if settings.get("direct_type") and not wk.has_ime_punct(new):
+            wk.type_text(new)                                            # 模式②直接打字（無全形標點才用）
         else:
-            _App38._paste_selection(self, new, reselect=False)   # 模式①剪貼簿（只貼這段）
+            _App38._paste_selection(self, new, reselect=False)   # 模式①剪貼簿（含標點→貼上，繞過注音吃字）
 
-    # ===== 難例紀錄新 schema（同 exe）：input=raw / output=第一次F1 / gold(auto·manual) / tries =====
-    def _case_finalize(self):
-        old = getattr(self, "_case", None)
-        if old and not old.get("done") and old.get("tries", 0) >= 2 and self._learn_mode() == "both":
-            self._maybe_auto_learn(old["last"], wrong=old["output"], src="auto")
-        self._case = None
-
-    def _case_first(self, raw, result):
-        self._case_finalize()                                  # 換新句＝上一句定案 → both 模式才學
-        self._case = {"input": raw, "output": result, "last": result, "tries": 1, "done": False}
-
-    def _case_again(self, result):
-        c = getattr(self, "_case", None)
-        if not c:
-            return
-        c["tries"] += 1
-        c["last"] = result
-        if c["tries"] >= 2:
-            try:
-                logbook.upsert_error_case(c["input"], c["output"], c["last"], "auto", c["tries"])
-            except Exception:
-                pass
-
-    @staticmethod
-    def _learn_mode():
-        m = settings.get("auto_learn")
-        return "manual" if m is True else (m if m in ("both", "manual", "off") else "off")
-
-    def _set_learn(self, mode):
-        settings.set("auto_learn", mode)
-        self._notify({"both": "自動學詞：auto＋manual(F9)（實驗，連 auto 記的也學）",
-                      "manual": "自動學詞：僅 manual(F9)",
-                      "off": "自動學詞：關閉"}.get(mode, mode))
-        self._refresh_menu()
-
+    # tries 觀察者：純 super() + 數次數，完全不影響引擎行為。錯了沒關係、只當參考。
     def _cycle_correct(self, read_fn, kind, cyclekey, force=False):
-        got = read_fn()
-        if got is None:
-            return
-        target, writer = got
+        before = self._cycle
+        super()._cycle_correct(read_fn, kind, cyclekey, force)
         cyc = self._cycle
-        if not force and cyc and cyc.get("kind") == kind and target == cyc["list"][cyc["idx"]]:
-            cyc["idx"] = (cyc["idx"] + 1) % len(cyc["list"])
-            nxt = cyc["list"][cyc["idx"]]
-            writer(nxt)
-            self._last = (cyc["orig"], nxt)
-            self._case_again(nxt)
-            if nxt == cyc["orig"]:
-                self._notify("已還原為原句")
-            return
-        ranked = self.corrector.ranked_corrections(target)
-        best = ranked[0]
-        self._cycle = {"list": ranked, "idx": 0, "orig": target, "kind": kind,
-                       "read_fn": read_fn, "cyclekey": cyclekey}
-        self._last = (target, best)
-        if force:
-            self._case_again(best)
-        else:
-            self._case_first(target, best)
-        if best != target:
-            writer(best)
-            changes = [(i, a, b) for i, (a, b) in enumerate(zip(target, best)) if a != b]
-            logbook.log_correction(target, best, changes, self.corrector.margin)
-            edits = editfmt.fmt_edits(changes)
-            tag = "重算" if force else "已修正"
-            self._notify(f"{tag}：{edits}（不滿意再按 {cyclekey} 換候選，共 {len(ranked)} 個）")
-        elif force:
-            self._notify(f"目前沒有可再修的同音字：{target}")
-        elif len(ranked) > 1:
-            self._notify(f"未發現需修正（再按 {cyclekey} 看其他候選，共 {len(ranked)} 個）")
-        else:
-            self._cycle = None
-            self._notify(f"未發現需修正的同音字：{target}")
+        if cyc is not None:
+            cyc["tries"] = (cyc.get("tries", 0) + 1) if cyc is before else 1
 
-    def _do_recorrect(self):                  # F2
-        cyc = self._cycle
-        orig0 = cyc.get("orig") if cyc else None
-        if _foreground_process() in _CONSOLES:
-            self._notify(_CON_MSG["F2"]); return
-        rf = cyc.get("read_fn") if cyc else None
-        self._cycle_correct(rf or self._read_unit, (cyc.get("kind") if cyc else "unit"),
-                            (cyc.get("cyclekey") if cyc else "F1"), force=True)
-        if self._cycle and orig0:
-            self._cycle["orig"] = orig0
+    def _on_f8(self):        # F8：把你剛剛複製的內容還原回剪貼簿（改字不再自動還原）
+        clip = getattr(self, "_clip_user", "")
+        if not clip:
+            self._notify("目前沒有記到你先前複製的內容"); return
+        self._set_clip(clip)
+        self._notify("已把你剛剛複製的內容還原到剪貼簿（可 Ctrl+V 貼上）")
 
-    def _do_record_correct(self):             # F9：補 gold(manual) + 學習（只有這裡學）
-        c = getattr(self, "_case", None)
-        if not c or c.get("tries", 0) < 2:
-            self._notify("還沒有可補的難例（第一次 F1 就改對的不記；先 F1 改、再按 F2／換候選）")
-            return
+    # F9：記正解 + 學詞。純旁觀、永遠可按（無 tries/_last_elogged 門檻）；log 只在真的改過才寫。
+    def _do_record_correct(self):
         cyc = self._cycle
-        read_fn = cyc.get("read_fn") if cyc else None
-        got = (read_fn or self._read_unit)()
+        if not cyc:
+            self._notify("先按 F1 改字，再按 F9 記正解")
+            return
+        got = (cyc.get("read_fn") or self._read_unit)()
         if got is None:
             return
         correct = got[0]
-        try:
-            logbook.upsert_error_case(c["input"], c["output"], correct, "manual", c["tries"])
-        except Exception as e:
-            self._notify(f"補正解失敗：{e}"); return
-        msg = self._maybe_auto_learn(correct, wrong=c["output"])
-        c["done"] = True
-        self._notify(f"已補正解（manual）：{correct}" + msg)
-
-    def _do_restore(self):                    # F3：還原回 raw 原輸入
-        c = getattr(self, "_case", None)
-        cyc = self._cycle
-        raw = (c.get("input") if c else None) or (cyc.get("orig") if cyc else None)
-        if not raw:
-            self._notify("沒有可還原的（先按 F1/F4/F5 改字，再按 F3 還原回原字）")
-            return
-        read_fn = cyc.get("read_fn") if cyc else None
-        got = (read_fn or self._read_unit)()
-        if got is None:
-            return
-        _t, writer = got
-        try:
-            writer(raw)
-        except Exception as e:
-            self._notify(f"還原失敗：{e}"); return
-        self._last = (raw, raw)
-        if cyc and cyc.get("list"):
+        problem = cyc.get("orig")
+        learned = self._maybe_auto_learn(correct, wrong=problem) if problem else ""
+        if problem and problem != correct:
             try:
-                cyc["idx"] = cyc["list"].index(raw)
-            except (ValueError, KeyError, TypeError):
+                logbook.upsert_error_case(problem, problem, correct, "manual", cyc.get("tries"))
+            except Exception:
                 pass
-        self._notify(f"已還原回原字：{raw}")
+        self._notify(f"已記正解：{correct}" + (learned or ""))
+
+    # ---- 自學詞管理視窗（共享 csc.managewords；沿用 F6 框的『獨立緒 Tk + 關閉後 gc』防跨緒閃退）----
+    def _on_manage(self, icon=None, item=None):
+        threading.Thread(target=self._run_manage, daemon=True).start()
+
+    def _run_manage(self):
+        import gc
+        from csc import managewords
+        try:
+            managewords.open_manage_window(self._notify)
+        except Exception as e:
+            self._notify(f"管理視窗錯誤：{e}")
+        finally:
+            gc.collect()
+            self._refresh_menu()
 
 
 def main():

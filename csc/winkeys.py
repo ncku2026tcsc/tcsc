@@ -120,6 +120,23 @@ def type_text(text: str, delay: float = 0.003) -> None:
         time.sleep(delay)
 
 
+def has_ime_punct(s: str) -> bool:
+    """文字是否含『會被新注音(中文模式)當組字吃掉』的全形/CJK 標點 → 含則別用 type_text 直接打、改剪貼簿。
+    用 SendInput Unicode 注入這類標點時，TSF 注音會攔截成組字（留底線、把後續內容吃掉）。
+    涵蓋範圍（放寬：不只括弧，所有全形標點）：
+      U+3000–U+303F  CJK 標點：。、「」『』（半）《》【】〈〉〔〕〜 等
+      U+FF00–U+FFEF  全形 ASCII：？ ！ ： ； （ ） ， 等（含全形數字/字母，罕見、貼上無害）
+      U+2010–U+2027  一般標點：— – … ‘ ’ “ ”
+    半形 ASCII 標點（. , ? ! …）在注音不組字、用 type_text 安全 → 不列入（以免英數文字也被迫走剪貼簿）。"""
+    for ch in (s or ""):
+        o = ord(ch)
+        if o == 0x3000:                       # 全形空格：注音不組字、打字安全 → 不算（否則空格分隔的字都被迫走剪貼簿）
+            continue
+        if 0x3000 <= o <= 0x303F or 0xFF00 <= o <= 0xFFEF or 0x2010 <= o <= 0x2027:
+            return True
+    return False
+
+
 # ===== 輸入法切換 / 視窗搜尋（給 F6 框「開窗即切繁中注音」用）=====
 # 兩步：
 #   (1) 切鍵盤配置到繁中(zh-TW＝微軟新注音)：LoadKeyboardLayout + WM_INPUTLANGCHANGEREQUEST。

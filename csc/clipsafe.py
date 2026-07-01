@@ -42,14 +42,18 @@ def _anomaly(tag, detail=""):
 
 
 def begin_paste(app, new_text) -> bool:
-    """記住使用者剪貼簿（只在沒有待還原時）、把 new_text 寫進剪貼簿並確認。回 True=可貼。"""
-    app._clip_gen = getattr(app, "_clip_gen", 0) + 1        # 讓任何在途的舊還原失效
-    if not getattr(app, "_clip_pending", False):
-        app._clip_user = app._get_clip()                   # 真正的使用者剪貼簿（非上一次的校正結果）
+    """把使用者『真正複製的內容』記到 _clip_user（供 F8 還原）、寫 new_text 進剪貼簿並確認。回 True=可貼。
+    只在『剪貼簿有東西、且不是我們剛放的校正字/清空』時更新 _clip_user → 不會被自己的校正結果污染
+    （＝使用者要求的『不要複製到剛剛拿來改的字』）。"""
+    app._clip_gen = getattr(app, "_clip_gen", 0) + 1        # 讓任何在途的舊清空失效
+    current = app._get_clip()
+    if current and current != getattr(app, "_our_last_clip", None):
+        app._clip_user = current                           # 使用者真的複製了新東西 → 更新 stash
     if not app._set_clip_confirm(new_text):                # 寫入端：沒寫進去就別硬貼舊內容
         app._set_clip(getattr(app, "_clip_user", ""))
         _anomaly("set_fail")
         return False
+    app._our_last_clip = new_text                          # 記住我們放的，下次別當使用者內容
     return True
 
 
@@ -62,13 +66,18 @@ def reconfirm(app, new_text) -> None:
 
 def end_paste(app) -> None:
     """延遲還原使用者剪貼簿（世代守衛）：保留新內容 RESTORE_DELAY 秒後，若無更新的貼上才還原。"""
+    from . import settings
+    # 病根根治：**不再還原使用者剪貼簿**（還原正是「貼到上一筆內容」的來源）。
+    #   auto_clear 開（預設）→ 延遲清空（給慢的程式讀完校正字再清）；關 → 什麼都不做、校正字留著（零 race）。
+    #   你原本複製的內容存在 _clip_user，隨時可用 F8 還原回剪貼簿。
+    if not settings.get("auto_clear_clip"):
+        return
     app._clip_pending = True
     gen = app._clip_gen
-    user = getattr(app, "_clip_user", "")
 
     def worker():
         time.sleep(RESTORE_DELAY)
-        if app._clip_gen == gen:               # 沒有更新的貼上 → 由我負責還原
-            app._set_clip(user)
+        if app._clip_gen == gen:               # 沒有更新的貼上 → 清空
+            app._set_clip("")
             app._clip_pending = False
     threading.Thread(target=worker, daemon=True).start()

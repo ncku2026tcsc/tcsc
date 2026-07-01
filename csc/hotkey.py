@@ -52,6 +52,7 @@ VK_F4 = 0x73
 VK_F5 = 0x74
 VK_F6 = 0x75
 VK_F7 = 0x76
+VK_F8 = 0x77
 VK_F9 = 0x78
 VK_F10 = 0x79
 VK_F12 = 0x7B            # 註：F12 為 Windows 保留鍵，RegisterHotKey 一定失敗，勿用
