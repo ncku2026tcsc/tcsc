@@ -24,6 +24,10 @@ from . import phonetics, segmenter
 
 DEFAULT_MODEL = "ckiplab/bert-base-chinese"
 
+# 常錯字組（F8 強制細修用）：讀音不完全相同（的得地讀音不同、那哪差聲調）→ F1 的同音守門碰不到。
+CONFUSABLE_GROUPS = ["在再", "那哪", "的得地"]
+_CONF_OF = {ch: g for g in CONFUSABLE_GROUPS for ch in g}
+
 
 @dataclass
 class Result:
@@ -94,12 +98,63 @@ class SelectCorrector:
         changes = [(k, a, b) for k, (a, b) in enumerate(zip(text, cur)) if a != b]
         return Result(text, cur, changes)
 
+    # ===== F8：常錯字強制細修（freeze 後處理，只動 在再/那哪/的得地）=====
+    def has_confusable(self, text) -> bool:
+        return any(ch in _CONF_OF for ch in (text or ""))
+
+    @torch.no_grad()
+    def confusable_variants(self, text, top_n=12):
+        """窮舉常錯字組合的整句變體，一次遮罩全部常錯字位置打分，回傳『排除原句、由高到低』的變體清單。
+        遮掉『你打的原字』模型對剩下才判得準（同 ONNX 版）。"""
+        positions = [i for i, ch in enumerate(text or "") if ch in _CONF_OF]
+        if not positions:
+            return []
+        ids = self.tok(text, return_tensors="pt").to(self.device)["input_ids"][0]
+        batch = ids.unsqueeze(0).clone()
+        for i in positions:
+            if i + 1 < ids.size(0) - 1:
+                batch[0, i + 1] = self.tok.mask_token_id
+        lp = torch.log_softmax(self.model(batch.to(self.device)).logits, dim=-1)[0]
+        lp_at = {}
+        for i in positions:
+            if i + 1 >= ids.size(0) - 1:
+                return []
+            d = {}
+            for c in _CONF_OF[text[i]]:
+                cid = self.tok.convert_tokens_to_ids(c)
+                if cid is not None and cid != self.tok.unk_token_id:
+                    d[c] = lp[i + 1, cid].item()
+            if not d:
+                return []
+            lp_at[i] = d
+        from itertools import product
+        choices = [[(i, c, s) for c, s in lp_at[i].items()] for i in positions]
+        scored = []
+        for combo in product(*choices):
+            chars = list(text)
+            score = 0.0
+            for (i, c, s) in combo:
+                chars[i] = c
+                score += s
+            v = "".join(chars)
+            if v != text:
+                scored.append((score, v))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        seen, out = set(), []
+        for _s, v in scored:
+            if v not in seen:
+                seen.add(v)
+                out.append(v)
+            if len(out) >= top_n:
+                break
+        return out
+
 
 # ===== csc/select_corrector_v2 =====
 # -*- coding: utf-8 -*-
 """SelectCorrector v2 —— 不先斷詞，改用「窮舉可連詞」當選擇題。
 
-設計（依使用者定案）：
+設計（定案）：
   - 小麥詞庫已定義「哪些相鄰字是詞」，不需自己斷詞。
   - 只要相鄰 2~4 字（依讀音）能連成真詞，就「必須」把該詞的同音詞加入選項，
     不先 commit 一種切法（避免斷錯傳播）。

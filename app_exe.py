@@ -1718,7 +1718,11 @@ class _App9(_App8):
         return result["text"]
 
     def _send_to_window(self, hwnd, text):
-        """切回原視窗鍵入 text。哨兵 \\x00＝Ctrl+Enter 軟換行（重播框裡按的鍵）；其餘字直接打。"""
+        """切回原視窗鍵入 text。哨兵 \\x00＝Ctrl+Enter 軟換行（重播框裡按的鍵）。
+        寫回方式與 F1 _write_unit 完全一致：貼上（剪貼簿）模式永遠貼上；打字模式預設打字，
+        但該段含全形標點（注音會吃字）時自動改走剪貼簿貼上。用 _App23._paste_selection 強制貼上，
+        避開 _paste_selection 的『依模式改打字』覆寫（同 F1 的做法）。"""
+        from csc import settings
         time.sleep(0.08)
         self._bring_to_front(hwnd)
         time.sleep(0.12)
@@ -1726,8 +1730,13 @@ class _App9(_App8):
             if i:
                 wk.combo(wk.VK_CONTROL, VK_RETURN)
                 time.sleep(0.03)
-            if seg:
-                wk.type_text(seg)
+            if not seg:
+                continue
+            if settings.get("direct_type") and not wk.has_ime_punct(seg):
+                wk.type_text(seg)                                    # 打字模式且無全形標點 → 直接打
+            else:
+                _App23._paste_selection(self, seg, reselect=False)   # 貼上模式 or 含標點 → 剪貼簿貼上（同 F1）
+                time.sleep(0.05)
         self._notify("已輸入到原視窗（請檢查後自行按 Enter 送出）")
 
 
@@ -2258,7 +2267,7 @@ class _App20(_App19):
             hotkey.VK_F5: self._on_f3,            # 只改反白（原 F4，handler 名 _on_f3）
             hotkey.VK_F6: self._on_f6,            # 開輸入框
             hotkey.VK_F7: self._on_f2_learn,      # 學習反白詞（原 F3）
-            hotkey.VK_F8: self._on_f8,            # 還原我剛剛複製的內容到剪貼簿
+            hotkey.VK_F8: self._on_confusable,    # 常錯字強制細修（在再/那哪/的得地；還原剪貼簿改到選單）
             hotkey.VK_F9: self._on_logerror,      # 更新 error cases / 補 gold（原 F10）
             hotkey.VK_F10: self._on_f9_pause,     # 關閉/恢復熱鍵（原 F9）
         }, keep_vks=(hotkey.VK_F10,))
@@ -2977,13 +2986,18 @@ class _App30(_App29):
             pystray.MenuItem("模式①　剪貼簿貼上（相容，預設）",
                              lambda i, it: self._set_direct(False),
                              checked=lambda item: not bool(settings.get("direct_type")), radio=True),
-            pystray.MenuItem("模式②　直接打字（不經剪貼簿）",
+            pystray.MenuItem("模式②　直接打字（不支援全形標點，遇標點自動切換為貼上）",
                              lambda i, it: self._set_direct(True),
                              checked=lambda item: bool(settings.get("direct_type")), radio=True),
         ))
         clearclip = pystray.MenuItem("改字怪怪的？點我清空剪貼簿", self._clear_clipboard)
+        restoreclip = pystray.MenuItem("還原我剛剛複製的內容到剪貼簿", self._on_f8)
         autoclear = pystray.MenuItem("改字後自動清空剪貼簿", self._toggle_auto_clear,
                                      checked=lambda item: bool(settings.get("auto_clear_clip")))
+        autorestore = pystray.MenuItem("用過後 30 秒自動還原你的剪貼簿", self._toggle_auto_restore,
+                                       checked=lambda item: bool(settings.get("auto_restore_clip")))
+        wrapfix = pystray.MenuItem("自動折行補選字（慢的話可關）", self._toggle_wrap_fix,
+                                   checked=lambda item: bool(settings.get("wrap_fix")))
         try:
             _nw = len(userdict.entries_by_word())
         except Exception:
@@ -2991,7 +3005,7 @@ class _App30(_App29):
         manage = pystray.MenuItem(f"管理我學的詞…（共 {_nw}）", self._on_manage)
         pending = self._pending_menu_items()      # 待確認新詞（排在剛剛學之上）
         recent = self._recent_menu_items()        # 剛剛學的字
-        return pystray.Menu(mode, clearclip, autoclear, manage,
+        return pystray.Menu(mode, clearclip, restoreclip, autoclear, autorestore, wrapfix, manage,
                             *pending, *recent, pystray.Menu.SEPARATOR, *base_items)
 
     def _toggle_auto_clear(self, icon=None, item=None):
@@ -3001,9 +3015,23 @@ class _App30(_App29):
                      else "改字後自動清空剪貼簿：關（改回還原你原本的剪貼簿，預設）")
         self._refresh_menu()
 
+    def _toggle_auto_restore(self, icon=None, item=None):
+        on = not settings.get("auto_restore_clip")
+        settings.set("auto_restore_clip", on)
+        self._notify("用過後 30 秒自動還原剪貼簿：開（改完 30 秒沒再動作，就把你原本複製的內容還原回來；期間又動作會重新倒數）" if on
+                     else "用過後 30 秒自動還原剪貼簿：關（要還原請按 F8）")
+        self._refresh_menu()
+
+    def _toggle_wrap_fix(self, icon=None, item=None):
+        on = not settings.get("wrap_fix")
+        settings.set("wrap_fix", on)
+        self._notify("自動折行補選字：開（claude.ai／gemini 自動折行時不再疊字；每次 F1 多一次剪貼簿來回、稍慢）" if on
+                     else "自動折行補選字：關（F1 較快，但 claude.ai／gemini 自動折行的那句可能少改一格）")
+        self._refresh_menu()
+
     def _set_direct(self, on):
         settings.set("direct_type", bool(on))
-        self._notify("改字方式 → 直接打字（不經剪貼簿）" if on
+        self._notify("改字方式 → 直接打字（不支援全形標點，遇標點會自動切換為貼上）" if on
                      else "改字方式 → 剪貼簿貼上（相容、支援換行，預設）")
         self._refresh_menu()
 
@@ -3038,10 +3066,41 @@ class TrayApp(_App30):
     def _write_unit(self, old, new):
         wk.select_left(textutil.utf16_len(old))
         time.sleep(0.04)
+        self._extend_if_wrap_short(old)   # 自動折行(soft-wrap)少選一格→補選，杜絕疊字
         if settings.get("direct_type") and not wk.has_ime_punct(new):
             wk.type_text(new)                                            # 模式②直接打字（無全形標點才用）
         else:
             _App23._paste_selection(self, new, reselect=False)   # 模式①剪貼簿（含標點→貼上，繞過注音吃字）
+
+    def _extend_if_wrap_short(self, old):
+        """claude.ai / gemini 等『自動折行(soft-wrap)』時，Shift+← 跨折行處會多吃一格(caret 換行 affinity)，
+        使選取比 old 少最左幾格 → 貼回後最左字沒被蓋到＝疊字（症狀：沒手動換行、字溢到下一行就少一格）。
+        非破壞性修正：複製目前選取比對——只有『確定選到的正好是 old 去掉最左 n 格(old.endswith(sel))』才補按
+        n 次 Shift+←；確認不了(空/逾時/對不上)就完全不動，維持原行為、不惡化。序列化(_op_lock)下不會與別的操作重疊。
+        只做幾何補正、不碰校正決策（純觀察者原則）。可在系統匣關閉（嫌每次 F1 多一次剪貼簿來回太慢）。"""
+        if not settings.get("wrap_fix"):
+            return                              # 使用者關掉了折行補選（嫌慢）
+        want = old.replace("\r\n", "").replace("\r", "").replace("\n", "")
+        if len(want) < 2:
+            return                              # 太短：補選的誤判風險大於效益
+        try:
+            pre = self._get_clip()
+            self._set_clip(SENTINEL)
+            time.sleep(0.02)
+            wk.combo(wk.VK_CONTROL, wk.VK_C)
+            got = self._poll_clip(timeout=0.5)  # 短逾時：折行的瀏覽器複製很快，慢的 app 對不上就跳過
+            self._set_clip(pre)                 # 還原，避免污染 clipsafe 的『使用者剪貼簿』判斷
+        except Exception:
+            return
+        if not got or got == SENTINEL:
+            return
+        sel = got.replace("\r\n", "").replace("\r", "").replace("\n", "")
+        if not sel or sel == want:
+            return                              # 選取精準：不動
+        missing = len(want) - len(sel)
+        if 1 <= missing <= 3 and want.endswith(sel):   # 只補『少選了最左 missing 格』這種明確情形
+            wk.select_left(textutil.utf16_len(want[:missing]))
+            time.sleep(0.02)
 
     # tries 觀察者：純 super() + 數次數，**完全不影響引擎行為**（v2.55 引擎原樣跑）。錯了沒關係、只當參考。
     def _cycle_correct(self, read_fn, kind, cyclekey, force=False):
@@ -3058,6 +3117,45 @@ class TrayApp(_App30):
             self._notify("目前沒有記到你先前複製的內容"); return
         self._set_clip(clip)
         self._notify("已把你剛剛複製的內容還原到剪貼簿（可 Ctrl+V 貼上）")
+
+    # F8：常錯字強制細修（freeze 後的強制版 F1/F4/F5，只動 在再/那哪/的得地）。
+    # 對『剛剛改的那段』窮舉常錯字變體→去掉原句→模型打分→套最高分；連按往下一個變體換（自己一套 cycle，
+    # 不碰 v2.55 引擎）。沒有這三組字→跳「沒有常錯字」。
+    def _on_confusable(self):
+        cyc = self._cycle
+        read_fn = (cyc.get("read_fn") if cyc else None) or self._read_unit
+        got = read_fn()
+        if got is None:
+            return
+        cur, writer = got
+        cc = getattr(self, "_conf_cycle", None)
+        if cc and cc.get("last") == cur and cc.get("list"):          # 連按：往下一個變體換
+            cc["idx"] = (cc["idx"] + 1) % len(cc["list"])
+            nxt = cc["list"][cc["idx"]]
+            writer(nxt)
+            cc["last"] = nxt
+            self._notify_conf(cc["src"], nxt, cc["idx"], len(cc["list"]))
+            return
+        if not self.corrector.has_confusable(cur):
+            self._conf_cycle = None
+            self._notify("這段沒有常錯字（在再／那哪／的得地），免按 F8")
+            return
+        variants = self.corrector.confusable_variants(cur, top_n=12)
+        if not variants:
+            self._conf_cycle = None
+            self._notify("這段沒有可換的常錯字")
+            return
+        lst = variants + [cur]                                       # 原句擺最後，連按可循環回來
+        self._conf_cycle = {"list": lst, "idx": 0, "last": variants[0], "src": cur}
+        writer(variants[0])
+        self._notify_conf(cur, variants[0], 0, len(lst))
+
+    def _notify_conf(self, src, dst, idx, total):
+        changes = [(i, a, b) for i, (a, b) in enumerate(zip(src, dst)) if a != b]
+        if changes:
+            self._notify(f"常錯字強制換：{editfmt.fmt_edits(changes)}（{idx + 1}/{total}，再按 F8 換下一個）")
+        else:
+            self._notify(f"已回到你原本打的字（{idx + 1}/{total}，再按 F8 換下一個）")
 
     # F9：記正解 + 學詞。純旁觀（不碰循環）、**永遠可按**（無 tries/_last_elogged 門檻）。
     # log 只在「真的改過」(orig != 現值) 才寫，避免記 no-op；學詞交給 _maybe_auto_learn（依 auto_learn 設定）。

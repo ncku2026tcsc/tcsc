@@ -1655,8 +1655,11 @@ class _App11(_App10):
         return result["text"]
 
     def _send_to_window(self, hwnd, text):
-        """切回原視窗鍵入 text。哨兵 \\x00＝Ctrl+Enter 軟換行（重播你在框裡按的鍵）；
-        其餘字（含 Shift+Enter 的純 \\n）用 SendInput 直接打。不按 Enter，游標留給你檢查。"""
+        """切回原視窗鍵入 text。哨兵 \\x00＝Ctrl+Enter 軟換行（重播你在框裡按的鍵）。
+        寫回方式與 F1 _write_unit 完全一致：貼上（剪貼簿）模式永遠貼上；打字模式預設打字，
+        但該段含全形標點（注音會吃字）時自動改走剪貼簿貼上。用 _App38._paste_selection 強制貼上，
+        避開 _paste_selection 的『依模式改打字』覆寫（同 F1 的做法）。"""
+        from csc import settings
         time.sleep(0.08)
         self._bring_to_front(hwnd)
         time.sleep(0.12)
@@ -1664,8 +1667,13 @@ class _App11(_App10):
             if i:                                      # 段與段之間＝一個 Ctrl+Enter 軟換行
                 wk.combo(wk.VK_CONTROL, VK_RETURN)
                 time.sleep(0.03)
-            if seg:
-                wk.type_text(seg)
+            if not seg:
+                continue
+            if settings.get("direct_type") and not wk.has_ime_punct(seg):
+                wk.type_text(seg)                                    # 打字模式且無全形標點 → 直接打
+            else:
+                _App38._paste_selection(self, seg, reselect=False)   # 貼上模式 or 含標點 → 剪貼簿貼上（同 F1）
+                time.sleep(0.05)
         self._notify("已輸入到原視窗（請檢查後自行按 Enter 送出）")
 
     # ---- F4 反白手動修：移除終端機剪貼簿分支，終端機改用 F6 ----
@@ -1704,7 +1712,7 @@ class _App11(_App10):
 # -*- coding: utf-8 -*-
 """tray v22 = v21 + 修「F1 貼上偶爾貼成『上一個剪貼簿內容』」的競態。
 
-症狀（使用者回報）：F1 改完後，Windows 通知顯示的是正確的改字內容，但實際貼上的卻是
+症狀：F1 改完後，Windows 通知顯示的是正確的改字內容，但實際貼上的卻是
 『上一次剪貼簿裡的東西』，而且特別容易在「剪貼簿原本就有內容」時發生。
 
 根因（在 v17 的 _replace_window）：流程是
@@ -1765,7 +1773,7 @@ class _App12(_App11):
 # -*- coding: utf-8 -*-
 """tray v23 = v22 + 讓 F7「前30字整段重修」也能像 F1 一樣『再按換下一個候選』。
 
-原本 F7 是一次性（`_cycle=None`，按第二次只是重算出同一個 best）。使用者要它比照 F1
+原本 F7 是一次性（`_cycle=None`，按第二次只是重算出同一個 best）。改成比照 F1
 的選項循環：第一次 F7 修成最佳，**該段沒被改動時再按 F7 → 換下一個候選**，轉一圈回原句
 （即使第一次「沒發現需修正」，也能再按 F7 逐一看其他候選，與 F1 階段20 行為一致）。
 
@@ -1989,7 +1997,7 @@ class _App16(_App15):
 
 問題1：F12 無法當全域熱鍵——Windows 保留 F12 給除錯器，`RegisterHotKey(F12)` 一定回傳 0
 （實測 F8~F11 可、F12 不可）。v24 註冊失敗只是靜默跳過，等於 F12 功能從沒生效、瀏覽器照樣
-吃掉它。改用 **F10**（單鍵、可註冊；使用者選定），並把它併進 F1~F7 同一個熱鍵迴圈（單一
+吃掉它。改用 **F10**（單鍵、可註冊；定案），並把它併進 F1~F7 同一個熱鍵迴圈（單一
 執行緒），不再用 v24 那個會註冊失敗的獨立緒。
 
 問題2：F6 輸入框內也要能記錄改錯題目。框內修正在 Tk 緒、狀態藏在 `_input_box_dialog` 的閉包，
@@ -2061,7 +2069,7 @@ class _App17(_App16):
 # -*- coding: utf-8 -*-
 """tray v28 = v27 + F4「反白手動修」加上 F1 式『再按換下一個候選』循環。
 
-使用者：F4 很好用，但只要改字就該像 F1 一樣能換候選、行為完全同 F1。
+F4 很好用，但只要改字就該像 F1 一樣能換候選、行為完全同 F1。
 
 關鍵：原本 F4 的 `_correct_selection_text` 本來就是「把反白用標點切句、每句取
 `ranked_corrections(part)[0]`」——**單一子句的反白，第一次結果本來就 = `ranked_corrections(反白)[0]`**，
@@ -2140,7 +2148,7 @@ class _App18(_App17):
 # -*- coding: utf-8 -*-
 """tray v29 = v28 + 把 F1/F2/F4/F7 的循環邏輯**統一成一套引擎**（並修 F7 通知太多）。
 
-使用者：F1/F4/F7 應該統一邏輯，不然亂亂的、也沒辦法保證行為都對；且「前30字(F7)」通知太多，
+F1/F4/F7 應該統一邏輯，不然亂亂的、也沒辦法保證行為都對；且「前30字(F7)」通知太多，
 應該跟 F1 一樣只有第一次提示。
 
 之前各寫一套（`_cycle` / `_cycle_win` / `_sel_cycle`），且通知不一致（F1 中間候選安靜，F4/F7
@@ -2279,7 +2287,7 @@ class _App19(_App18):
 # -*- coding: utf-8 -*-
 """tray v30 = v29 + 讓 F2「重算」對 F1/F4/F7 都通用（共用同一個 F2 鍵）。
 
-使用者：F2 的「以當前字重算」應該不只服務 F1，F4(反白)、F7(前30字) 也該能用，且共用 F2 鍵——
+F2 的「以當前字重算」應該不只服務 F1，F4(反白)、F7(前30字) 也該能用，且共用 F2 鍵——
 做完哪個鍵，按 F2 就重算那個鍵的當前目標。
 
 統一引擎(v29)讓這件事很簡單：每輪循環只差在「用哪個 read_fn 取文字」。本版讓 `self._cycle`
@@ -2320,7 +2328,7 @@ class _App20(_App19):
 # -*- coding: utf-8 -*-
 """tray v31 = v30 + 按 F2 時自動記下『原題』到 error_cases.log（不必手動 F10、不必追蹤狀態）。
 
-使用者洞察：按 F2 ＝「模型剛剛改錯了、我要重算」＝這就是一筆失敗案例的訊號。所以按 F2 時就
+關鍵：按 F2 ＝「模型剛剛改錯了、我要重算」＝這就是一筆失敗案例的訊號。所以按 F2 時就
 自動做 F10 的事——而且要在「**重算之前**」記，因為此刻 `self._cycle["orig"]` 還是**最初的原題**
 （F1 循環不會動 orig；是 F2 重算才會把 orig 重設成當前字）。如此不必額外追蹤一堆 origin0 狀態，
 F10「記到 F2 後的半成品」那個問題就自然解了。
@@ -2486,7 +2494,7 @@ class _App23(_App22):
 # -*- coding: utf-8 -*-
 """tray v34 = v33 + F10 改用途：不再記『失敗題目』，改成『改完後補正確答案(gold)』。難例清單改存 JSONL。
 
-使用者回報：F10 原本的用途（手動記下改錯的題目）已**無作用**——因為 v31/v32 起，按 F2 或
+F10 原本的用途（手動記下改錯的題目）已**無作用**——因為 v31/v32 起，按 F2 或
 F1/F4/F7 按第二次時就會**自動**把原題（含改錯成的內容）記進難例清單，不必再手動 F10。
 
 所以把 F10 改成更有價值的事：**我自己把字改對之後，按 F10 把『正確答案』補進該筆 log**。
@@ -3045,7 +3053,7 @@ class _App35(_App34):
             hotkey.VK_F5: self._on_f3,            # 只改反白（原 F4，handler 名 _on_f3）
             hotkey.VK_F6: self._on_f6,            # 開輸入框
             hotkey.VK_F7: self._on_f2_learn,      # 學習反白詞（原 F3）
-            hotkey.VK_F8: self._on_f8,            # 還原我剛剛複製的內容到剪貼簿
+            hotkey.VK_F8: self._on_confusable,    # 常錯字強制細修（在再/那哪/的得地；還原剪貼簿改到選單）
             hotkey.VK_F9: self._on_logerror,      # 更新 error cases / 補 gold（原 F10）
             hotkey.VK_F10: self._on_f9_pause,     # 關閉/恢復熱鍵（原 F9）
         }, keep_vks=(hotkey.VK_F10,))             # 暫停時保留關熱鍵的鍵，才能再開
@@ -3241,7 +3249,7 @@ class _App36(_App35):
 # -*- coding: utf-8 -*-
 """tray v47 = v46 + v2.31：抓欄位文字失敗時自動重抓一次（第二次也失敗才報「沒抓到文字」）。
 
-使用者回報：偶爾第一次 F1/F2/F4 抓不到文字（前景程式/剪貼簿剛好沒就緒、Office 延遲渲染等），
+症狀：偶爾第一次 F1/F2/F4 抓不到文字（前景程式/剪貼簿剛好沒就緒、Office 延遲渲染等），
 其實再按一次就好。所以把「重試」做進程式：`_grab_window()` 第一次回 None 就稍等再抓一次，
 仍 None 才交給上層通知（上層 _read_unit/_read_win 的「沒抓到文字」維持不變、只會在重抓也失敗時跳）。
 單點覆寫即涵蓋 F1/F2（_read_unit）與 F4 前30字（_read_win），反白(F5)走 _grab_selection 不受影響。
@@ -3337,7 +3345,7 @@ class _App38(_App37):
 # -*- coding: utf-8 -*-
 """tray v49 = v48 + v2.33（實驗）：改字「直接打字」——不經剪貼簿，根除貼上競態。
 
-洞察（使用者）：F6 框用 type_text 就超快 → 平常感覺的「慢」其實是剪貼簿那串 sleep，不是模型。
+關鍵：F6 框用 type_text 就超快 → 平常感覺的「慢」其實是剪貼簿那串 sleep，不是模型。
 而「貼上的內容由 Windows 決定」（目標程式何時讀剪貼簿不受我們控制）正是貼到舊內容的根因。
 所以最聰明的解＝**不要用剪貼簿**：選好要取代的區域後，用 SendInput Unicode（wk.type_text，
 繞過注音 IME，F6 框已在用）把校正後的字**直接打進去**——送什麼就是什麼、確定性、零剪貼簿足跡。
@@ -3408,7 +3416,7 @@ class _App39(_App38):
 """tray v50 = v49 + v2.4 大改版：改字「貼上方式」二選一（模式1 直接打字 / 模式2 剪貼簿），預設模式1。
 
 承 v2.33 的洞察（不碰剪貼簿＝根除貼上競態、F6 證實打字超快），但 v2.33 的「直接打字」是混合式
-（單行打字、多行退回剪貼簿），使用者指出這讓模式不純粹。v2.4 改成乾淨二選一：
+（單行打字、多行退回剪貼簿），這讓模式不純粹。v2.4 改成乾淨二選一：
   模式1（預設）＝**一律直接打字**（SendInput Unicode、繞注音 IME、完全不碰剪貼簿）——含多行：
     換行正規化成 \\n 直接打入（Unicode 換行不會像 Enter 鍵那樣誤送訊息）。
   模式2          ＝**一律剪貼簿貼上**（v2.32 的延遲還原 + 世代守衛安全路徑，相容性最高）。
@@ -3538,7 +3546,7 @@ class _App41(_App40):
 # -*- coding: utf-8 -*-
 """tray v52 = v51 + v2.5：直接打字模式的換行改用 Shift+Enter（軟換行）→ 兩個模式都完整支援多行。
 
-v2.41 把直接打字標成「不支援換行」（Unicode \\n 注入會被吞）。使用者點出更好的解：**換行直接送
+v2.41 把直接打字標成「不支援換行」（Unicode \\n 注入會被吞）。更好的解：**換行直接送
 Shift+Enter**（多數編輯器/聊天室都當「軟換行」、不會送出訊息）。於是直接打字也能正確換行：
   - 寫回時把文字依 \\n 切段，逐段 type_text，段與段之間送一次 **Shift+Enter**。
   - 選單拿掉「不支援換行」標註；「清空剪貼簿」改名為更白話的求救文案；使用說明加「卡住了？」段。
@@ -3645,7 +3653,7 @@ class _App43(_App42):
 # -*- coding: utf-8 -*-
 """tray v54 = v53 + v2.52：修「模式②直接打字遇多行越換越多行」＋版本號回標題（單一來源）。
 
-bug（使用者回報，模式②直接打字）：多行時越換越多行。根因：直接打字是「選游標前 50 格→重打整段」，
+bug（模式②直接打字）：多行時越換越多行。根因：直接打字是「選游標前 50 格→重打整段」，
 多行時 Shift+Left 的選取格數（換行算 1 格）和抓回字串長度（換行＝\\r\\n 兩字元）對不齊，加上
 Shift+Enter 軟換行各 app 行為不一 → 每次循環沒把舊換行選乾淨又補新的 → 行數累加。單行無此問題。
 
@@ -3795,13 +3803,18 @@ class _App45(_App44):
             pystray.MenuItem("模式①　剪貼簿貼上（相容，預設）",
                              lambda i, it: self._set_direct(False),
                              checked=lambda item: not bool(settings.get("direct_type")), radio=True),
-            pystray.MenuItem("模式②　直接打字（不經剪貼簿）",
+            pystray.MenuItem("模式②　直接打字（不支援全形標點，遇標點自動切換為貼上）",
                              lambda i, it: self._set_direct(True),
                              checked=lambda item: bool(settings.get("direct_type")), radio=True),
         ))
         clearclip = pystray.MenuItem("改字怪怪的？點我清空剪貼簿", self._clear_clipboard)
+        restoreclip = pystray.MenuItem("還原我剛剛複製的內容到剪貼簿", self._on_f8)
         autoclear = pystray.MenuItem("改字後自動清空剪貼簿", self._toggle_auto_clear,
                                      checked=lambda item: bool(settings.get("auto_clear_clip")))
+        autorestore = pystray.MenuItem("用過後 30 秒自動還原你的剪貼簿", self._toggle_auto_restore,
+                                       checked=lambda item: bool(settings.get("auto_restore_clip")))
+        wrapfix = pystray.MenuItem("自動折行補選字（慢的話可關）", self._toggle_wrap_fix,
+                                   checked=lambda item: bool(settings.get("wrap_fix")))
         try:
             _nw = len(userdict.entries_by_word())
         except Exception:
@@ -3809,7 +3822,7 @@ class _App45(_App44):
         manage = pystray.MenuItem(f"管理我學的詞…（共 {_nw}）", self._on_manage)
         pending = self._pending_menu_items()      # 待確認新詞（排在剛剛學之上）
         recent = self._recent_menu_items()        # 剛剛學的字
-        return pystray.Menu(mode, clearclip, autoclear, manage,
+        return pystray.Menu(mode, clearclip, restoreclip, autoclear, autorestore, wrapfix, manage,
                             *pending, *recent, pystray.Menu.SEPARATOR, *base)
 
     def _toggle_auto_clear(self, icon=None, item=None):
@@ -3819,9 +3832,23 @@ class _App45(_App44):
                      else "改字後自動清空剪貼簿：關（改回還原你原本的剪貼簿，預設）")
         self._refresh_menu()
 
+    def _toggle_auto_restore(self, icon=None, item=None):
+        on = not settings.get("auto_restore_clip")
+        settings.set("auto_restore_clip", on)
+        self._notify("用過後 30 秒自動還原剪貼簿：開（改完 30 秒沒再動作，就把你原本複製的內容還原回來；期間又動作會重新倒數）" if on
+                     else "用過後 30 秒自動還原剪貼簿：關（要還原請按 F8）")
+        self._refresh_menu()
+
+    def _toggle_wrap_fix(self, icon=None, item=None):
+        on = not settings.get("wrap_fix")
+        settings.set("wrap_fix", on)
+        self._notify("自動折行補選字：開（claude.ai／gemini 自動折行時不再疊字；每次 F1 多一次剪貼簿來回、稍慢）" if on
+                     else "自動折行補選字：關（F1 較快，但 claude.ai／gemini 自動折行的那句可能少改一格）")
+        self._refresh_menu()
+
     def _set_direct(self, on):
         settings.set("direct_type", bool(on))
-        self._notify("改字方式 → 直接打字（不經剪貼簿）" if on
+        self._notify("改字方式 → 直接打字（不支援全形標點，遇標點會自動切換為貼上）" if on
                      else "改字方式 → 剪貼簿貼上（相容、支援換行，預設）")
         self._refresh_menu()
 
@@ -3860,10 +3887,41 @@ class TrayApp(_App45):
         """只取代『被改的那段』(break-free、等長 → 選取精準、不碰前面行與換行)；模式①剪貼簿/模式②打字。"""
         wk.select_left(textutil.utf16_len(old))
         time.sleep(0.04)
+        self._extend_if_wrap_short(old)   # 自動折行(soft-wrap)少選一格→補選，杜絕疊字
         if settings.get("direct_type") and not wk.has_ime_punct(new):
             wk.type_text(new)                                            # 模式②直接打字（無全形標點才用）
         else:
             _App38._paste_selection(self, new, reselect=False)   # 模式①剪貼簿（含標點→貼上，繞過注音吃字）
+
+    def _extend_if_wrap_short(self, old):
+        """claude.ai / gemini 等『自動折行(soft-wrap)』時，Shift+← 跨折行處會多吃一格(caret 換行 affinity)，
+        使選取比 old 少最左幾格 → 貼回後最左字沒被蓋到＝疊字（症狀：沒手動換行、字溢到下一行就少一格）。
+        非破壞性修正：複製目前選取比對——只有『確定選到的正好是 old 去掉最左 n 格(old.endswith(sel))』才補按
+        n 次 Shift+←；確認不了(空/逾時/對不上)就完全不動，維持原行為、不惡化。序列化(_op_lock)下不會與別的操作重疊。
+        只做幾何補正、不碰校正決策（純觀察者原則）。可在系統匣關閉（嫌每次 F1 多一次剪貼簿來回太慢）。"""
+        if not settings.get("wrap_fix"):
+            return                              # 使用者關掉了折行補選（嫌慢）
+        want = old.replace("\r\n", "").replace("\r", "").replace("\n", "")
+        if len(want) < 2:
+            return                              # 太短：補選的誤判風險大於效益
+        try:
+            pre = self._get_clip()
+            self._set_clip(SENTINEL)
+            time.sleep(0.02)
+            wk.combo(wk.VK_CONTROL, wk.VK_C)
+            got = self._poll_clip(timeout=0.5)  # 短逾時：折行的瀏覽器複製很快，慢的 app 對不上就跳過
+            self._set_clip(pre)                 # 還原，避免污染 clipsafe 的『使用者剪貼簿』判斷
+        except Exception:
+            return
+        if not got or got == SENTINEL:
+            return
+        sel = got.replace("\r\n", "").replace("\r", "").replace("\n", "")
+        if not sel or sel == want:
+            return                              # 選取精準：不動
+        missing = len(want) - len(sel)
+        if 1 <= missing <= 3 and want.endswith(sel):   # 只補『少選了最左 missing 格』這種明確情形
+            wk.select_left(textutil.utf16_len(want[:missing]))
+            time.sleep(0.02)
 
     # tries 觀察者：純 super() + 數次數，完全不影響引擎行為。錯了沒關係、只當參考。
     def _cycle_correct(self, read_fn, kind, cyclekey, force=False):
@@ -3879,6 +3937,44 @@ class TrayApp(_App45):
             self._notify("目前沒有記到你先前複製的內容"); return
         self._set_clip(clip)
         self._notify("已把你剛剛複製的內容還原到剪貼簿（可 Ctrl+V 貼上）")
+
+    # F8：常錯字強制細修（freeze 後的強制版 F1/F4/F5，只動 在再/那哪/的得地）。窮舉變體→去掉原句→
+    # 模型打分→套最高分；連按往下一個變體換（自己一套 cycle，不碰引擎）。沒有這三組字→跳「沒有常錯字」。
+    def _on_confusable(self):
+        cyc = self._cycle
+        read_fn = (cyc.get("read_fn") if cyc else None) or self._read_unit
+        got = read_fn()
+        if got is None:
+            return
+        cur, writer = got
+        cc = getattr(self, "_conf_cycle", None)
+        if cc and cc.get("last") == cur and cc.get("list"):          # 連按：往下一個變體換
+            cc["idx"] = (cc["idx"] + 1) % len(cc["list"])
+            nxt = cc["list"][cc["idx"]]
+            writer(nxt)
+            cc["last"] = nxt
+            self._notify_conf(cc["src"], nxt, cc["idx"], len(cc["list"]))
+            return
+        if not self.corrector.has_confusable(cur):
+            self._conf_cycle = None
+            self._notify("這段沒有常錯字（在再／那哪／的得地），免按 F8")
+            return
+        variants = self.corrector.confusable_variants(cur, top_n=12)
+        if not variants:
+            self._conf_cycle = None
+            self._notify("這段沒有可換的常錯字")
+            return
+        lst = variants + [cur]                                       # 原句擺最後，連按可循環回來
+        self._conf_cycle = {"list": lst, "idx": 0, "last": variants[0], "src": cur}
+        writer(variants[0])
+        self._notify_conf(cur, variants[0], 0, len(lst))
+
+    def _notify_conf(self, src, dst, idx, total):
+        changes = [(i, a, b) for i, (a, b) in enumerate(zip(src, dst)) if a != b]
+        if changes:
+            self._notify(f"常錯字強制換：{editfmt.fmt_edits(changes)}（{idx + 1}/{total}，再按 F8 換下一個）")
+        else:
+            self._notify(f"已回到你原本打的字（{idx + 1}/{total}，再按 F8 換下一個）")
 
     # F9：記正解 + 學詞。純旁觀、永遠可按（無 tries/_last_elogged 門檻）；log 只在真的改過才寫。
     def _do_record_correct(self):

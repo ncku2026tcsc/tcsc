@@ -26,6 +26,7 @@ import threading
 import time
 
 RESTORE_DELAY = 0.8        # Ctrl+V 後新內容保留在剪貼簿的秒數（給慢的程式讀完才還原）
+RESTORE_AFTER = 30         # auto_restore：用過後幾秒沒再動作，就把你原本複製的內容還原回剪貼簿
 
 
 def _anomaly(tag, detail=""):
@@ -44,7 +45,7 @@ def _anomaly(tag, detail=""):
 def begin_paste(app, new_text) -> bool:
     """把使用者『真正複製的內容』記到 _clip_user（供 F8 還原）、寫 new_text 進剪貼簿並確認。回 True=可貼。
     只在『剪貼簿有東西、且不是我們剛放的校正字/清空』時更新 _clip_user → 不會被自己的校正結果污染
-    （＝使用者要求的『不要複製到剛剛拿來改的字』）。"""
+    （＝『不要複製到剛剛拿來改的字』的需求）。"""
     app._clip_gen = getattr(app, "_clip_gen", 0) + 1        # 讓任何在途的舊清空失效
     current = app._get_clip()
     if current and current != getattr(app, "_our_last_clip", None):
@@ -65,19 +66,34 @@ def reconfirm(app, new_text) -> None:
 
 
 def end_paste(app) -> None:
-    """延遲還原使用者剪貼簿（世代守衛）：保留新內容 RESTORE_DELAY 秒後，若無更新的貼上才還原。"""
+    """貼上後的剪貼簿善後——兩個『各自獨立』的延遲選項，都用 _clip_gen 世代守衛（每次 begin_paste +1，
+    任何在途的舊計時器看到世代變了就放棄＝『期間又動作→倒數歸零』）：
+      (A) auto_clear_clip：RESTORE_DELAY(0.8s) 後把校正字清成 ""（給慢的程式讀完校正字再清、杜絕貼到舊內容；
+          零還原＝不會有「上一筆內容」race）。
+      (B) auto_restore_clip：RESTORE_AFTER(30s) 內沒再動作，就把『你原本複製的內容』(_clip_user) 還原回剪貼簿
+          ——自動版 F8。30s 遠大於任何程式讀剪貼簿的延遲 → 沒有 race。還原前再確認『目前剪貼簿仍是我們放的
+          校正字/空』才動手：期間你自己複製了新東西就別蓋掉（只有更新才紀錄、也只在該還原時才還原）。"""
     from . import settings
-    # 病根根治：**不再還原使用者剪貼簿**（還原正是「貼到上一筆內容」的來源）。
-    #   auto_clear 開（預設）→ 延遲清空（給慢的程式讀完校正字再清）；關 → 什麼都不做、校正字留著（零 race）。
-    #   你原本複製的內容存在 _clip_user，隨時可用 F8 還原回剪貼簿。
-    if not settings.get("auto_clear_clip"):
-        return
-    app._clip_pending = True
-    gen = app._clip_gen
 
-    def worker():
-        time.sleep(RESTORE_DELAY)
-        if app._clip_gen == gen:               # 沒有更新的貼上 → 清空
-            app._set_clip("")
-            app._clip_pending = False
-    threading.Thread(target=worker, daemon=True).start()
+    if settings.get("auto_clear_clip"):
+        app._clip_pending = True
+        gen = app._clip_gen
+
+        def clear_worker():
+            time.sleep(RESTORE_DELAY)
+            if app._clip_gen == gen:                     # 沒有更新的貼上 → 清空
+                app._set_clip("")
+                app._clip_pending = False
+        threading.Thread(target=clear_worker, daemon=True).start()
+
+    if settings.get("auto_restore_clip"):
+        gen2 = app._clip_gen
+
+        def restore_worker():
+            time.sleep(RESTORE_AFTER)
+            if app._clip_gen != gen2:                    # 期間又貼過(倒數歸零) → 此計時器作廢
+                return
+            cur = app._get_clip()
+            if cur == "" or cur == getattr(app, "_our_last_clip", None):
+                app._set_clip(getattr(app, "_clip_user", ""))   # 只在還是我們放的字/空 才還原，不蓋你新複製的
+        threading.Thread(target=restore_worker, daemon=True).start()

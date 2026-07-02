@@ -22,7 +22,7 @@ from .userpaths import userforce_path
 
 _FILE = userforce_path()
 _CAP = 8            # 多音字讀音組合上限
-_MAX_LEVEL = 10    # 最高段（含單字）；2026-07-01 使用者要求上限拉到 10
+_MAX_LEVEL = 10    # 最高段（含單字）；2026-07-01 上限拉到 10
 
 
 def derive_seqs(word: str):

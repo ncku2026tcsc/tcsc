@@ -26,6 +26,11 @@ from csc.onnx_engine import OnnxBert, log_softmax
 
 _DELIM = "，。！？；：、,.!?;:　 \t\n"
 _CLAUSE = re.compile("[^" + re.escape(_DELIM) + "]+")
+
+# 常錯字組（F8 強制細修用）：讀音不完全相同（的得地讀音不同、那哪差聲調）→ F1 的『同音守門』碰不到，
+# 打錯了也不會被改。F8 對這三組繞過守門、純 BERT 打分強制換。
+CONFUSABLE_GROUPS = ["在再", "那哪", "的得地"]
+_CONF_OF = {ch: g for g in CONFUSABLE_GROUPS for ch in g}
 _BOOST = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                       "data", "custom_boost.txt")
 
@@ -167,6 +172,56 @@ class OnnxCorrector:
                 break
         if clause not in out:
             out.append(clause)
+        return out
+
+    # ===== F8：常錯字強制細修（freeze 後處理，只動 在再/那哪/的得地）=====
+    def has_confusable(self, text) -> bool:
+        return any(ch in _CONF_OF for ch in (text or ""))
+
+    def confusable_variants(self, text, top_n=12):
+        """窮舉 text 中所有常錯字(在再/那哪/的得地)組合的整句變體，**一次遮罩全部常錯字位置**打分，
+        回傳『排除原句後、依模型分數由高到低』的變體清單（供 F8 循環）。
+        打分＝各常錯字位置遮罩後、該位置候選字 log-prob 之和——把『你打的原字』遮掉，模型對剩下判得才準
+        （關鍵：不遮的話模型會一直覺得原本那個錯字最順）。"""
+        positions = [i for i, ch in enumerate(text or "") if ch in _CONF_OF]
+        if not positions:
+            return []
+        ids = self.bert.encode(text)
+        masked = ids[:]
+        for i in positions:
+            if i + 1 < len(masked):
+                masked[i + 1] = self.bert.mask
+        logits = self.bert.run([masked])[0]
+        lp_at = {}
+        for i in positions:
+            if i + 1 >= len(logits):
+                return []
+            row = log_softmax(logits[i + 1])
+            d = {c: float(row[tid]) for c in _CONF_OF[text[i]]
+                 if (tid := self.bert.token_id(c)) is not None}
+            if not d:
+                return []
+            lp_at[i] = d
+        from itertools import product
+        choices = [[(i, c, s) for c, s in lp_at[i].items()] for i in positions]
+        scored = []
+        for combo in product(*choices):
+            chars = list(text)
+            score = 0.0
+            for (i, c, s) in combo:
+                chars[i] = c
+                score += s
+            v = "".join(chars)
+            if v != text:                       # 去掉原輸入那句
+                scored.append((score, v))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        seen, out = set(), []
+        for _s, v in scored:
+            if v not in seen:
+                seen.add(v)
+                out.append(v)
+            if len(out) >= top_n:
+                break
         return out
 
 
