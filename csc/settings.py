@@ -25,6 +25,7 @@ _DEFAULTS = {
     "auto_clear_clip": True,     # 改字後自動清空剪貼簿——2026-07-01 預設開（杜絕「貼到舊內容」；代價是洗掉你複製的東西）
     "auto_restore_clip": True,   # 用過後 30 秒沒再動作→自動還原你原本複製的內容（自動版 F8，安全延遲、期間又動作則倒數歸零）——預設開
     "wrap_fix": True,            # 自動折行(claude.ai/gemini)少選一格→疊字 的補選驗證；每次 F1 多一次剪貼簿來回，嫌慢可關——預設開
+    "clip_speed": 5,             # 剪貼簿改字速度檔（實驗）：1最快…5最慢(現行/最穩)；縮放寫回/貼上的等待時間，太快可能重現競態
 }
 _cache = None
 
@@ -55,3 +56,12 @@ def set(key: str, value) -> None:
             json.dump(_all(), f, ensure_ascii=False, indent=2)
     except Exception:
         pass
+
+
+_CLIP_FACTOR = {1: 0.25, 2: 0.45, 3: 0.65, 4: 0.85, 5: 1.0}   # 速度檔→等待時間倍率（越低越快）
+
+
+def sp(base: float) -> float:
+    """把剪貼簿寫回路徑的等待時間依速度檔縮放（檔位越低 sleep 越短→越快；太快可能重現競態，
+    故預設第 5 檔＝1.0＝現行/最穩）。只給剪貼簿改字那條路用。"""
+    return base * _CLIP_FACTOR.get(get("clip_speed", 5), 1.0)

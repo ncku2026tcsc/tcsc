@@ -34,6 +34,7 @@ AUTHOR_EMAIL = "ncku2026tcsc@gmail.com"
 SENTINEL = "\x00__zfix__\x00"
 VK_LEFT, VK_RIGHT = 0x25, 0x27
 GRAB_CHARS = 50
+F7_NOTIFY_DELAY = 1.5    # F7 連按學詞：停手幾秒後才發一則總通知（不逐次跳）；改 3 秒把這行改成 3.0
 _DELIM = "，。！？；：、,.!?;:　 \t\n"
 _CONSOLES = {"powershell.exe", "pwsh.exe", "cmd.exe", "windowsterminal.exe",
              "conhost.exe", "openconsole.exe", "wt.exe", "mobaxterm.exe",
@@ -950,13 +951,34 @@ class _App7(_App6):
             return
         wordphon.reload_userforce()
         self._refresh_menu()
-        if status == "ok":                                   # 報等級（對齊 tray v20、與 F9 自動學一致）
-            cap = userdict.cap_for(word)
-            self._notify(f"已學「{word}」：強度 {level}/{cap}（再按 F7 加強，越高越容易贏）")
-        elif status == "maxed":
-            self._notify(f"「{word}」已是最高強度 {level}（再按也不會更強）")
-        else:
-            self._notify(f"「{word}」：{msg}")
+        self._f7_defer_notify(word, status, level)           # 連按防彈跳：累積、停手後發一則總通知
+
+    # ---- F7 連按防彈跳通知：累積本輪學到的詞，停手 F7_NOTIFY_DELAY 秒後發一則總通知 ----
+    # 世代守衛(_f7_gen，同 auto-restore)：期間又按→倒數歸零、舊計時器作廢，只有最後一顆計時器會發。
+    def _f7_defer_notify(self, word, status, level):
+        buf = getattr(self, "_f7_buf", None)
+        if buf is None:
+            buf = self._f7_buf = {}
+        buf[word] = (status, level)                          # 同詞連按→保留最後(最高)等級，只算一筆
+        self._f7_gen = getattr(self, "_f7_gen", 0) + 1
+        gen = self._f7_gen
+
+        def fire():
+            time.sleep(F7_NOTIFY_DELAY)
+            if self._f7_gen != gen:                          # 期間又按 F7 → 此計時器作廢
+                return
+            items, self._f7_buf = self._f7_buf, {}
+            self._notify(self._f7_summary(items))
+        threading.Thread(target=fire, daemon=True).start()
+
+    def _f7_summary(self, items):
+        if len(items) == 1:
+            w, (st, lv) = next(iter(items.items()))
+            if st == "maxed":
+                return f"已學「{w}」：已達最高強度 {lv}"
+            return f"已學「{w}」：強度 {lv}/{userdict.cap_for(w)}（再按 F7 加強）"
+        parts = "、".join(f"{w}(強度{lv})" for w, (_st, lv) in items.items())
+        return f"已學 {len(items)} 個詞：{parts}"
 
     def _do_correct_selection(self):
         is_console = _foreground_process() in _CONSOLES
@@ -1445,12 +1467,12 @@ class _App9(_App8):
         sb.pack(side="right", fill="y")
         txt.config(yscrollcommand=sb.set)
 
-        status = tk.Label(root, text="F1 改字(再按換選項) · F2 重算 · F3 還原 · F4 前30字 · F5 修反白 · Enter 送出",
+        status = tk.Label(root, text="F1 改字(再按換選項) · F2 重算 · F3 還原 · F4 前30字 · F5 修反白 · F7 學詞 · Enter 送出",
                           font=SMALL, fg="#888", bg="#f4f4f4", anchor="w",
                           wraplength=440, justify="left")
         status.grid(row=2, column=0, sticky="we", padx=10, pady=(8, 2))
 
-        tk.Label(root, text="F1=改字 F2=重算 F3=還原 F4=前30字 F5=反白　Enter=送出　"
+        tk.Label(root, text="F1=改字 F2=重算 F3=還原 F4=前30字 F5=反白 F7=學詞　Enter=送出　"
                             "Ctrl+Enter=軟換行(終端機不送出)　Shift+Enter=純換行　Esc 按兩下=取消",
                  font=SMALL, fg="#aaa", bg="#f4f4f4").grid(
                      row=3, column=0, sticky="we", padx=10, pady=(0, 2))
@@ -1595,6 +1617,28 @@ class _App9(_App8):
                 pass
             status.config(text=f"已還原回原字：{orig}", fg="#1a7f37")
 
+        def box_learn():
+            """F7：學框內反白的詞（結果顯示在狀態列，不彈系統通知）。"""
+            try:
+                s = txt.get("sel.first", "sel.last").strip()
+            except Exception:
+                s = ""
+            if not s:
+                status.config(text="（先反白『正確的詞』再按 F7 學習）", fg="#888")
+                return
+            if len(s) > 8:
+                status.config(text="選取太長，請只選一個詞（≤8 字）", fg="#888")
+                return
+            st, lv, msg = userdict.learn(s)
+            if st == "nochar":
+                status.config(text=f"無法學「{s}」：{msg}", fg="#888")
+                return
+            wordphon.reload_userforce()
+            if st == "maxed":
+                status.config(text=f"「{s}」已是最高強度 {lv}", fg="#1a7f37")
+            else:
+                status.config(text=f"已學「{s}」：強度 {lv}/{userdict.cap_for(s)}（再按 F7 加強）", fg="#1a7f37")
+
         def poll():
             try:
                 while True:
@@ -1607,6 +1651,8 @@ class _App9(_App8):
                         box_run("sel", False)
                     elif cmd == "f7":
                         box_run("win", False)
+                    elif cmd == "learn":               # F7：學框內反白的詞
+                        box_learn()
                     elif cmd == "restore":             # F3：還原回原字
                         box_restore()
                     elif cmd == "f10":                 # 框內 F10：記正確答案(gold)（鉤子，子類提供）
@@ -2211,6 +2257,16 @@ class _App19(_App18):
             return
         super()._on_f7()
 
+    def _on_f2_learn(self):      # F7 鍵 ＝ 學習反白詞；框開著時轉進框（框內學框裡反白的詞）
+        q = getattr(self, "_box_q", None)
+        if q is not None:
+            try:
+                q.put("learn")
+            except Exception:
+                pass
+            return
+        super()._on_f2_learn()
+
     # ---- (2) gold 自動記錄：循環換候選 → gold 跟著『目前最後選到的選項』----
     def _cycle_correct(self, read_fn, kind, cyclekey, force=False):
         before = self._cycle
@@ -2506,7 +2562,7 @@ PyInstaller 進入點（ZhuyinFix.spec）改指向本檔。
 import gc
 import time
 
-from csc import crashlog, winkeys as wk, textutil, clipsafe
+from csc import crashlog, winkeys as wk, textutil, clipsafe, settings
 
 
 class _App23(_App22):
@@ -2515,10 +2571,10 @@ class _App23(_App22):
         if not clipsafe.begin_paste(self, new_window):
             raise RuntimeError("剪貼簿被佔用，沒貼成功，請再按一次 F1")
         wk.select_left(GRAB_CHARS)
-        time.sleep(0.05)
+        time.sleep(settings.sp(0.05))            # 依速度檔縮放
         clipsafe.reconfirm(self, new_window)     # 貼上前再確認剪貼簿沒被蓋掉
         wk.combo(wk.VK_CONTROL, wk.VK_V)
-        time.sleep(0.12)                         # 短 settle；新內容留在剪貼簿，由延遲還原顧讀取端
+        time.sleep(settings.sp(0.12))            # 短 settle（依速度檔縮放）；新內容留在剪貼簿
         clipsafe.end_paste(self)
 
     def _paste_selection(self, text, reselect=True):
@@ -2527,7 +2583,7 @@ class _App23(_App22):
             raise RuntimeError("剪貼簿被佔用，沒貼成功，請再按一次 F5")
         clipsafe.reconfirm(self, text)
         wk.combo(wk.VK_CONTROL, wk.VK_V)
-        time.sleep(0.12)
+        time.sleep(settings.sp(0.12))            # 依速度檔縮放
         if reselect:
             wk.select_left(textutil.utf16_len(text))
         clipsafe.end_paste(self)
@@ -2998,6 +3054,7 @@ class _App30(_App29):
                                        checked=lambda item: bool(settings.get("auto_restore_clip")))
         wrapfix = pystray.MenuItem("自動折行補選字（慢的話可關）", self._toggle_wrap_fix,
                                    checked=lambda item: bool(settings.get("wrap_fix")))
+        speed = pystray.MenuItem("剪貼簿改字速度（實驗）", pystray.Menu(*self._speed_items()))
         try:
             _nw = len(userdict.entries_by_word())
         except Exception:
@@ -3005,8 +3062,28 @@ class _App30(_App29):
         manage = pystray.MenuItem(f"管理我學的詞…（共 {_nw}）", self._on_manage)
         pending = self._pending_menu_items()      # 待確認新詞（排在剛剛學之上）
         recent = self._recent_menu_items()        # 剛剛學的字
-        return pystray.Menu(mode, clearclip, restoreclip, autoclear, autorestore, wrapfix, manage,
+        return pystray.Menu(mode, clearclip, restoreclip, autoclear, autorestore, wrapfix, speed, manage,
                             *pending, *recent, pystray.Menu.SEPARATOR, *base_items)
+
+    # ---- 剪貼簿改字速度（實驗）：5 段，縮放寫回/貼上的等待時間；預設第5檔＝現行/最穩 ----
+    def _speed_items(self):
+        labels = {5: "第 5 檔　最慢 · 最穩（預設）", 4: "第 4 檔　稍快",
+                  3: "第 3 檔　中等", 2: "第 2 檔　快", 1: "第 1 檔　最快（可能不穩）"}
+        return [pystray.MenuItem(labels[n], self._mk_speed(n),
+                                 checked=self._mk_speed_checked(n), radio=True)
+                for n in (5, 4, 3, 2, 1)]
+
+    def _mk_speed(self, n):
+        return lambda icon, item: self._set_clip_speed(n)
+
+    def _mk_speed_checked(self, n):
+        return lambda item: int(settings.get("clip_speed", 5) or 5) == n
+
+    def _set_clip_speed(self, n):
+        settings.set("clip_speed", int(n))
+        tag = {5: "最慢·最穩", 1: "最快·可能不穩"}.get(n, "較快")
+        self._notify(f"剪貼簿改字速度 → 第 {n} 檔（{tag}）。若某台電腦卡在第二次選取，往下調幾檔試試")
+        self._refresh_menu()
 
     def _toggle_auto_clear(self, icon=None, item=None):
         on = not settings.get("auto_clear_clip")
@@ -3065,7 +3142,7 @@ class TrayApp(_App30):
 
     def _write_unit(self, old, new):
         wk.select_left(textutil.utf16_len(old))
-        time.sleep(0.04)
+        time.sleep(settings.sp(0.04))     # 等選取落地（依速度檔縮放）
         self._extend_if_wrap_short(old)   # 自動折行(soft-wrap)少選一格→補選，杜絕疊字
         if settings.get("direct_type") and not wk.has_ime_punct(new):
             wk.type_text(new)                                            # 模式②直接打字（無全形標點才用）

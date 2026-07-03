@@ -38,6 +38,14 @@ def open_manage_window(notify=None):
     top = tk.Frame(root, padx=10, pady=6)
     top.pack(fill="x")
     tk.Label(top, text="搜尋：", font=fnt).pack(side="left")
+    sort_state = {"desc": True}                    # True＝最新學的在最上面（預設降冪）
+
+    def toggle_sort():
+        sort_state["desc"] = not sort_state["desc"]
+        sort_btn.config(text="最新在上 ⬇" if sort_state["desc"] else "最舊在上 ⬆")
+        refresh()
+    sort_btn = tk.Button(top, text="最新在上 ⬇", font=fnt, takefocus=0, command=toggle_sort)
+    sort_btn.pack(side="right", padx=(6, 0))
     search_var = tk.StringVar()
     tk.Entry(top, textvariable=search_var, font=fnt).pack(side="left", fill="x", expand=True)
 
@@ -148,8 +156,11 @@ def open_manage_window(notify=None):
         learned = userdict.entries_by_word()
         root.title(f"管理我學的詞（共 {len(learned)} 個）")
         flt = search_var.get().strip()
+        items = list(learned.items())
+        if sort_state["desc"]:
+            items = items[::-1]                    # 最新學的在最上面（降冪）
         shown = 0
-        for word, lv in learned.items():
+        for word, lv in items:
             if flt and flt not in word:
                 continue
             shown += 1
