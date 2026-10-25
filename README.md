@@ -1,104 +1,162 @@
-# 繁體中文自動選字 v2.88
+# 算字大師 v6.56
 
-> ## ⬇️ [**點此下載執行檔（Windows，免安裝免設定）**](https://github.com/ncku2026tcsc/tcsc/releases/latest)
-> 解壓_v2.88.zip後直接執行 `tcsc.exe`，常駐系統匣。一般使用者看下面「怎麼用」就夠了。
->
+**輸入法選錯的，交給我再算一次。**
 
-## 怎麼用
+用注音打字，打完一句發現選錯字，按 **F1**：它會用 AI 語言模型看整句重新算一次，錯的字一起改好。不對就再按一次。
 
-**🟢 打開後它在哪？**
-雙擊 `tcsc.exe` **不會跳出視窗**——它縮到螢幕**右下角的系統匣**（時鐘旁邊，可能要點「∧」往上的箭頭才看得到）。圖示**變綠色**就代表好了，之後一直在背景待命，使用者正常打字就好。
-如果喜歡的話，推薦把圖示直接抓到工具列上，這樣就不用再點「∧」了！
+| 新注音打出來的 | 按一下F1 |
+|---|---|
+| 這個城市跑步起來 | 這個程式跑不起來 |
+| 你鮮豔一夏 | 你先驗一下 |
+| 廖浩跟品茗 | 料號跟品名 |
+| 這是值得還是衡的 | 這是直的還是橫的 |
+| 如復健瑣事 | 如附件所示 |
+| `j;4ru4fu, gj bj4z83u,3ao6ej0 vu4`（忘了切中文） | 忘記切輸入法也沒關係 |
 
-**✍️ 開始用**
-在任何能打字的地方，打完一段話後：
-1. 務必先按 **Enter**，把輸入法自己的選字框關掉，否則抓不到字。
-2. 按 **F1**——它會抓你前面那段，看有沒有同音打錯，幫你改好。
-3. 改的不是你要的字？**再按 F1** 換下一個（一直按可以看 **10 個**選項）。
+- 不用換輸入法，新注音照用；記事本、瀏覽器、聊天軟體、終端機都能用
+- AI 模型在你的電腦上跑，不用連網，你打的字不會離開這台電腦（隱私說明見下方）
+- 不用安裝：解壓縮後開 `tcsc\tcsc.exe`；只用 CPU，記憶體約 2GB
+- 源自 NLP 課的期末專題：把語言模型用在選字問題上；免費、開源
 
-**🤔 還是不滿意？**
-- 一次沒改好：先按 F1 挑到比較順的，按 **F2 重算（迭代）**當新起點，再按 F1 慢慢挑。
-- 想反悔：按 **F3**，變回你原本打的字。
+系統需求：Windows 10／11（64 位元）。
 
-**⌨️ 每個鍵**
-F1 改字/換選項・F2 重算（迭代）・F3 還原・F4 改前 30 字・F5 只改反白的字・F6 開輸入框・F7 學會這個詞・F8 常錯字強制換（在再／那哪／的得地，可連按）・F9 記成正解・F10 關熱鍵
-（**F8 常錯字強制換**：F1 改完後，「在再／那哪／的得地」這類同音/形近字若還是錯的，按 F8 依語境強制換；連按可換下一個。還原剪貼簿改到系統匣右鍵選單。）
-（**F2 重算是通用的**：F1／F4／F5 做完哪個，按 F2 就重算哪個。系統匣右鍵有完整「使用說明」。）
+## 只要記五顆鍵
 
-**🖥️ 在終端機 / CLI**（claude code、cmd、PowerShell、MobaXterm…）
-這些地方沒辦法就地改字，請按 **F6** 開一個小輸入框，在框裡打字＋改字，改好按 Enter 送回原視窗。
+| 鍵 | 什麼時候按 |
+|---|---|
+| **F1** | 選錯字就按，整句重算；不對再按，換下一個 |
+| **F2** | 按過頭，退回上一個（**Shift+F2**＝直接回原句） |
+| **F3** | 對了一部分：從這裡再算 |
+| **F7** | 人名、專有名詞：反白兩個字以上的詞，按 5 下教它 |
+| **F8** | 在／再、哪／那選反了 |
 
-## 資料與隱私
+忘了切中文打出一串英文，一樣按 F1。其他功能放在下面「其他好用功能」，不用記，需要時再看。
 
-- **只在你的電腦本機執行，不收集、不上傳任何資料。** 沒有雲端、沒有追蹤。
-- 改錯歷史、難例都存在你自己電腦的 `logs\` 裡，給你參考。
-- 若想協助改進本程式，歡迎把 `logs\error_cases.jsonl` 寄給我（系統匣右鍵「聯繫作者」就有信箱）
+## 開始使用
 
-## ⭐ 執行
+1. 到 [Releases](../../releases/latest) 下載 `算字大師_v6.56.zip`，解壓到任何資料夾。
+2. 開 `tcsc\tcsc.exe`。右下角出現洋紅色的「算」字圖示、跳出「就緒」就能用（第一次啟動要幾秒）。
+   Windows 跳「已保護您的電腦」：按「其他資訊」→「仍要執行」（沒有買程式簽章）。
+3. 第一次開會跳出一分鐘教學，跟著按就好；教完會問要不要開機自動啟動、建立捷徑（預設都勾好）。
+4. 之後想再試：把「這個城市跑步起來」貼到記事本，游標放在最後，按 **F1**。
 
-**獨立 exe 版（推薦，免裝環境）**：下載 Release 的 `繁中自動選字.zip` → 解壓 → 執行 `tcsc.exe`，常駐系統匣。
+## 用之前先知道
 
-**每日版（原始碼，需 torch + transformers + GPU）**：
+- **第一下常常只改對一部分**：看到比較接近的，按 **F3** 從那裡再算；不對就再按 F1 換下一個。來回幾次就會對，一下才一秒。
+- **越改越亂**：**Shift+F2** 一鍵回原句；想自己挑字，再按 **Win+/**（見下方「自己挑字」）。
+- **人名、術語、你常用的詞**：反白兩個字以上的詞，按 5 下 **F7** 教它（見「已知問題」）。
+- **它說「沒抓到要修的句子」或「已停止寫入」**：先按 Enter 收掉選字底線，再按 F1。
+- **句子本來就是對的**，按 F1 也會被換掉一個字：按 F2 回原句就好。
+
+## 其他好用功能
+
+不用記，需要時再看。
+
+
+| 情況 | 按 |
+|---|---|
+| 改游標前那句（選字底線還在也可以） | **F1** |
+| 換下一個候選 | 再按 **F1** |
+| 退回上一個 | **F2**（退到底＝原句） |
+| 一鍵回原句 | **Shift+F2** |
+| 從目前的候選再算一次 | **F3** |
+| 改前一句／後一句 | **Shift+F1**／**Shift+F3** |
+| 只改某一段 | 先反白，再按 **F1** |
+| 在、再選反了 | **F8**，連按換下一種（的得地也要換：系統匣「我的用字」打開） |
+| 換人稱（你／妳、他／她） | **Shift+F8**，最通順的先（我媽說他→她）；連按換下一種 |
+| 忘了切中文、打出 `1u3bj6gji 5k4rm4` | **F1**＝轉成中文（比如說這句） |
+
+### 自己挑字：Shift+F2＋Win+/
+
+F1 越改越亂、或只想換一兩個字自己挑：
+
+1. 按 **Shift+F2**：整句回到你原本打的樣子。
+2. 游標移到要改的字前面，按 **Win+/**（Windows 新注音內建的重新選字）：選字底線會回來，像剛打完還沒按 Enter。
+3. 用 ←→ 移到那個字、按 ↓ 叫出選字窗挑，挑完按 Enter。
+
+記事本、Notepad++ 可以；終端機不支援 Win+/。
+
+## 已知問題
+
+- **模型不認得的專有名詞**（產品名、術語、人名）：按 F1 會越改越差，要**事先**用 F7 教它。
+  反白兩個字以上的詞按 **F7**，一下加一段，**按 5 下就夠**（有破音字會先跳小窗選讀音，段數填 5）。
+  單字只在一直選不到時才教，按 1～3 下；單字按太多下，同音的一般字也會被改成它。
+  已經改亂了：先 **Shift+F2** 回原句、把詞改對（上面的 Win+/ 或重打），再反白按 5 下 F7。
+  學過的詞在 **Shift+F7** 可以調段數、刪掉。
+
+## 快捷鍵
+
+| 鍵 | 作用 |
+|---|---|
+| F1 | 改游標前那句（有反白＝只改反白）；連按＝下一個候選；游標前是英文模式打的注音鍵＝轉成中文 |
+| F2 | 退回上一個候選；退到底＝原句；再按＝刪掉剛剛那句（先提示、再按才刪） |
+| F3 | 從目前的候選再算一次 |
+| Shift+F1 ／ Shift+F3 | 改前一句 ／ 改後一句 |
+| Shift+F2 | 一鍵回原句 |
+| F8 | 在再：各種換法，最通順的先（系統匣可加開的得地） |
+| Shift+F8 | 人稱：你／妳、他／她 逐一換，最通順的先 |
+| F7 ／ Shift+F7 | 把反白的詞學進個人詞庫，連按＝加幾段 ／ 我學的詞（有反白＝直接帶進去） |
+| F5 ／ Shift+F5 | 把反白的詞收進常識詞庫 ／ 查詞（反查注音、看同音字、加減字的讀音） |
+| Shift+F6 | 常錯字清單 |
+| F9 ／ Shift+F9 | 把目前的字記成正解 ／ 移除上一筆 |
+| Ctrl+Alt+←→ ／ ↑↓ | 游標移 1 格／1 行；快速按兩下＝跳到標點／空行；接數字＝走 N 格；加 Shift＝圈選 |
+| Ctrl+Alt+Backspace | 往左刪（加 Shift＝往右刪） |
+| Ctrl+Alt+[ ] 9 0 | 「 」 （ ） |
+| Ctrl+Alt+K / ' ; L | ！ ？ 、 ； ：（句號用微軟注音的 Ctrl+.） |
+| Ctrl+Alt+B N H J ` | ← → ↑ ↓ ～ |
+| Ctrl+Enter ／ Shift+Enter | 換行不送出 |
+| F10 | 暫停熱鍵：按一下 15 秒、兩下 30 秒、三下永久；永久時再按恢復 |
+| Shift+F11 | 版本 |
+| Esc Esc | 改字進行中連按兩下＝這一輪作廢 |
+| 雙擊系統匣圖示 | 放開卡住的按鍵 |
+
+F 鍵可以在系統匣「按鍵 → 改鍵…」換掉；符號鍵在「按鍵 → 符號鍵…」自己加、刪；完整說明在系統匣「使用說明」。
+
+## 系統匣選單
+
+- **使用說明**：使用說明、快捷鍵一覽、重看教學、快速移動教學
+- **我的用字**：人稱（你／妳、他／她）、字形（什麼／甚麼、台／臺……）、F8 也換的得地
+- **詞庫**：查詞、我學的詞、常錯字清單、內建詞庫
+- **按鍵**：改鍵、符號鍵、快速移動、統一換行
+- **通知與改字窗設定**：改字窗位置、大小、外觀、停留時間、列出其他候選
+- **改不動的時候**：放開卡住的按鍵、重新啟用熱鍵、清空剪貼簿、恢復原廠設定
+- **紀錄與回報**：匯出給作者、寄信給作者、檢查更新、紀錄開關
+- **進階**：抓字方式、寫回方式、終端機、亂碼轉中文的細項
+
+## 隱私
+
+- 所有運算都在你的電腦上完成，**不會把你打的字傳給作者或任何人**。
+- 唯一會連網的時候是你按系統匣「檢查更新」：只向 GitHub 查最新版號，不送任何本機資料（開機自動檢查預設關）。
+- 內建的 AI 推論元件 onnxruntime，官方版預設會透過 Windows 的診斷資料回傳使用統計；本程式一啟動就把它關掉。
+- 預設只記「改不對的句子」，**加密**存在 `%APPDATA%\tcsc\logs`，只有你這個 Windows 帳號打得開，保留 30 天；
+  系統匣「紀錄與回報」可以關掉、一鍵清除，或匯出給作者（解開成一份文字檔讓你先看過、刪掉不想給的，再自己寄）。
+- 學的詞（F5、F7）、設定存在 `%APPDATA%\tcsc`，是一般文字檔，可以自己看、自己改。
+- 重灌系統或換電腦後，舊的加密紀錄打不開（學的詞不受影響）。
+
+## 免責聲明
+
+本程式為學生專案，依 GPL-3.0 授權「依現狀」提供，不保證沒有錯誤；使用本程式造成的任何直接或間接損失，作者不負賠償責任。
+這台電腦與帳號的安全請自行保管；共用電腦建議關掉紀錄或使用後清除。回報問題時請不要直接傳整個紀錄資料夾。
+
+## 從原始碼建置
+
+需要 Windows、[Anaconda](https://www.anaconda.com/)。
+
 ```powershell
-雙擊 啟動注音校正.bat          # 背景常駐系統匣；或 python tray_app.py
-```
-首次執行自動下載模型 `ckiplab/bert-base-chinese`。
-
-**用法**：在任意輸入欄打注音、選到同音錯字 → 按 **F1** 自動選最順的字（再按 F1 換候選）；**F6** 開輸入框、**F10** 記錄改錯。系統匣右鍵可開關「F6 自動切注音 / 自動按 Shift / 開機自動啟動」。
-
-
-## 程式結構
-
-```
-app_exe.py            獨立 exe 進入點（ONNX 引擎，無 torch）
-tray_app.py           每日版進入點（torch + transformers）
-csc/
-  select_corrector.py        torch 句子級選字引擎（PLL + 詞頻先驗 + 同音守門 + 多音字收斂）
-  select_corrector_onnx.py   ONNX 版引擎（功能等同，供 exe）
-  segmenter.py               自建讀音斷詞器（DAG，不靠 jieba）
-  phonetics.py / wordphon.py 字級/詞級同音候選（McBopomofo 詞庫，含聲調純繁體）
-  reading_filter.py          多音字收斂 + 句尾語助詞守門
-  winkeys / hotkey / logbook / settings / autostart / crashlog / onnx_engine / textutil / userdict
-data/                 BPMFBase / BPMFMappings / phrase.occ（McBopomofo 詞庫）
-scripts/              重建模型：download_model → export_onnx → quantize_onnx（GPL 對應源碼）
-build_exe.ps1 / ZhuyinFix.spec   打包成 exe
+conda create -n pkg python=3.11
+conda activate pkg
+pip install onnxruntime numpy pystray pillow pyperclip pyinstaller
 ```
 
-資料來源：**McBopomofo 小麥注音輸入法** <https://github.com/openvanilla/McBopomofo>（詞庫，MIT）。模型：**ckiplab/bert-base-chinese**（GPL-3.0）。
+把 zip 裡 `tcsc\_internal\models\` 的 5 個檔放進 `models\`。詞庫資料不開源（見 [data/README.md](data/README.md)），
+原始碼可以閱讀與修改，但要實際執行需要自備詞庫資料。
 
-
-### 環境重建見檔末
-- BERT/GUI：base 環境（py3.13 + transformers 5.9 + torch 2.11 cu128 + tkinter），模型 `ckiplab/bert-base-chinese` 首次自動下載。
-- LLM 對照：`csc` 環境（py3.12 + llama-cpp-python cu124；cu124 wheel 需從 base 的 torch\lib 複製 cudart64_12/cublas64_12/cublasLt64_12.dll 進 llama_cpp\lib）。
-- 含中文腳本一律存 UTF-8 檔執行，勿用行內 `python -c "中文"`（cp950 會搞爛）。
-
-## 授權 License
-
-本專案以 **GNU General Public License v3.0（GPL-3.0）** 釋出。
-
-```
-Copyright (C) 2026 tcsc-dev (https://github.com/ncku2026tcsc/tcsc)
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
+```powershell
+python -m tcsc.main                                        # 直接執行
+powershell -ExecutionPolicy Bypass -File build.ps1         # 打包（產出 dist\tcsc\tcsc.exe）
 ```
 
-- 完整授權條文見 [`LICENSE`](LICENSE)（GPL-3.0 官方全文）。
-- 第三方元件與授權見 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)。
-- 貢獻條款（含未來轉授權的輕量 CLA）見 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
+## 授權
 
-**為什麼是 GPL-3.0**：本專案部分相依元件（中文 BERT 相關模型/函式庫）採 GPL-3.0，故整個發布物採 GPL-3.0。詞庫來自 **McBopomofo**（MIT）。未來若將其替換為寬鬆授權版本，方有機會轉為 MIT。
-
-## 使用與散布
-
-本專案以 GPL-3.0 釋出，歡迎自由使用、修改、散布。**散布或製作衍生作品時，請依授權保留著作權聲明與 `LICENSE`，並標註原始來源連結（本專案 GitHub：<https://github.com/ncku2026tcsc/tcsc>）。** 若於研究、作品或產品中使用，亦歡迎註明出處。
+程式碼：GPL-3.0（見 [LICENSE](LICENSE)）。第三方元件見 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+詞庫資料：不開源，以加密包隨執行檔發布（見 [data/README.md](data/README.md)）。
