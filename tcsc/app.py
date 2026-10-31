@@ -1585,7 +1585,7 @@ class App:
                 return
             update.mark()
             if update.newer(got[0]):
-                self.notify(f"有新版 {got[0]}（目前 {version.VERSION}）：已開下載頁，下載 zip 解壓後開新的 tcsc.exe")
+                self.notify(f"有新版 {got[0]}（目前 {version.VERSION}）：已開下載頁，下載安裝程式直接裝")
                 try:
                     webbrowser.open(got[1])
                 except Exception:
