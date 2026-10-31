@@ -18,7 +18,11 @@
 
 忘了切中文打出一串亂碼，一樣按 F1。
 
-教學影片：[成為算字大師必要會的五顆鍵](https://www.youtube.com/watch?v=SyYxbcE-QzQ)
+教學影片：
+
+https://github.com/user-attachments/assets/c9f16fa8-1537-4977-8254-92401134ec1a
+
+
 
 第一次開時，Windows 可能跳「已保護您的電腦」：按「其他資訊」，再按「仍要執行」。我們沒有買程式簽章，程式碼全部公開。
 
@@ -35,6 +39,10 @@
 1. 用你原本的輸入法照平常打字，不用改任何習慣。
 2. 看到選錯字，按 **F1**，它會把這段重新算過。
 3. 沒錯就繼續打，不用每句都按。
+
+
+https://github.com/user-attachments/assets/805a67f0-45ca-4788-994e-5aa167558316
+
 
 ## 常見的三個問題
 
