@@ -26,8 +26,6 @@ BROWSERS = frozenset({"chrome.exe", "msedge.exe", "firefox.exe", "brave.exe",
                       "opera.exe", "vivaldi.exe", "arc.exe"})
 UIA_DEAF = frozenset({"powerpnt.exe"})
 COMPOSE_HIDDEN = frozenset({"line.exe"})
-BLINK_FIRST = frozenset({"notepad.exe", "firefox.exe"})
-IME_UNKNOWN = frozenset({"notepad.exe"})
 
 
 def foreground_hwnd():
@@ -89,13 +87,6 @@ def ime_chinese(hwnd) -> bool:
         if not ime or not _user32.SendMessageW(ime, 0x283, 0x5, 0):
             return False
         return bool(_user32.SendMessageW(ime, 0x283, 0x1, 0) & 0x1)
-    except Exception:
-        return False
-
-
-def zh_layout(hwnd) -> bool:
-    try:
-        return (_user32.GetKeyboardLayout(_user32.GetWindowThreadProcessId(hwnd, None)) & 0xFFFF) == 0x0404
     except Exception:
         return False
 

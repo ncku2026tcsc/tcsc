@@ -268,17 +268,12 @@ def _log_garble_miss(line):
 def _hidden(p):
     if not settings.get("ime_commit", True):
         return False
-    proc = win.foreground_process()
-    return (p.layer == "終端機" or proc in win.COMPOSE_HIDDEN
-            or (settings.get("blink_first", True) and proc in win.BLINK_FIRST))
+    return (settings.get("blink_first", True) or p.layer == "終端機" or win.foreground_process() in win.COMPOSE_HIDDEN)
 
 
 def _commit_now():
-    fg = win.foreground_hwnd()
-    if win.ime_chinese(fg) or (win.foreground_process() in win.IME_UNKNOWN and win.zh_layout(fg)):
-        win.focus_blink(fg)
-        return True
-    return False
+    win.focus_blink(win.foreground_hwnd())
+    return True
 
 
 def read_unit(app, blinked=False, garble_ok=True):
@@ -413,10 +408,10 @@ def read_sel(app):
     return _sel_result(sel, lambda new: write.write_selection(app, sel, new, p.write))
 
 
-def read_prev_unit(app):
+def read_prev_unit(app, blinked=False):
     p = route.plan()
-    if _hidden(p):
-        _commit_now()
+    if _hidden(p) and not blinked:
+        blinked = _commit_now()
     window, ch, p = _window(app, p)
     if window is None:
         return None
@@ -424,6 +419,9 @@ def read_prev_unit(app):
     prev, mid, cur = textutil.split_prev_unit(_strip_zw(line_raw))
     prev = prev.lstrip(_WS)
     if not prev.strip():
+        if not blinked and settings.get("ime_commit", True):
+            win.focus_blink(win.foreground_hwnd())
+            return read_prev_unit(app, blinked=True)
         app.notify("游標前只有這一句，沒有上一句——直接按 F1 就好")
         return None
     route.note_grab(ch, p.layer)
@@ -452,6 +450,8 @@ def _next_unit(app, after):
 def read_next_unit(app):
     from . import write
     p = route.plan()
+    if _hidden(p):
+        _commit_now()
     if p.grab == "clip":
         app.notify("改後一句要讀游標後面的字，只有 UIA 做得到——抓字改成 UIA 或自動")
         return None

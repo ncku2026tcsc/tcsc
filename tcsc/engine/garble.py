@@ -246,6 +246,12 @@ def _keep_numbers(segs, run, base):
     return segs or None
 
 
+def _symbol_only(segs):
+    return (all(r and _syl(raw) == r for _p, raw, r in segs)
+            and all(x[0] + len(x[1]) == y[0] for x, y in zip(segs, segs[1:]))
+            and any(c in ",./;-" for _p, raw, _r in segs for c in raw))
+
+
 def _region(run, base, ime=True, need=2):
     k = len(run)
     while k > 0 and run[k - 1] not in TONES:
@@ -260,9 +266,9 @@ def _region(run, base, ime=True, need=2):
     best = _keep_numbers(best, run, base) if best else None
     if not best or sum(1 for x in best if x[2]) < need:
         return None
-    if not any(r and _syl(raw) == r and any(c.isalpha() for c in raw) for _p, raw, r in best):
-        return None
-    return best
+    if any(r and _syl(raw) == r and any(c.isalpha() for c in raw) for _p, raw, r in best):
+        return best
+    return best if _symbol_only(best) else None
 
 
 def _runs(line):
