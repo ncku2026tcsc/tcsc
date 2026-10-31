@@ -26,6 +26,8 @@ def _steps(old: str) -> int:
 
 
 def _emit(text: str, mode: str, reselect: bool = False):
+    if mode == "type" and (wk.has_ime_punct(text) or "\n" in text or "\r" in text):
+        mode = "paste"
     if mode == "type":
         wk.type_text(text)
         if reselect:

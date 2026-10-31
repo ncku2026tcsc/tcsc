@@ -12,12 +12,12 @@ from . import config, paths
 SPEC = (
     ("grab_mode", "auto"),
     ("ia2_browser", True),
-    ("write_mode", "paste"),
+    ("write_mode", "type"),
     ("sym_write", "paste"),
     ("log_on", True),
     ("log_detail", False),
     ("log_keep_days", 30),
-    ("update_check", False),
+    ("update_check", True),
 
     ("update_last", 0.0),
     ("tray_promote", True),
