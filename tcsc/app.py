@@ -143,7 +143,7 @@ class App:
             self.notify(f"引擎載入失敗：{e}")
             return
         self.tray.set("ready", "就緒")
-        self.notify("就緒：打完一句按 F1 改字；多按幾次 F1 換候選、F2 退回。")
+        self.notify("就緒：打完一句按 F1 改字；有進步按 F3 用這句重算，沒進步再按 F1 換下一個，F2 退回。")
 
     def _check_hotkeys(self):
         def poll():
@@ -268,7 +268,7 @@ class App:
                 self._autofill_gold()
                 self._garble_log(cyc, "F1")
                 if nxt == cyc["orig"]:
-                    self.notify("已回到原句（F1 往前 · F2 往回）")
+                    self.notify("已回到原句（F1 往前 · F3 用這句重算 · F2 往回）")
                 elif cyc.get("garble"):
                     self.notify(f"亂碼轉中文：{nxt}（{cyc['idx'] + 1}/{len(cyc['list']) - 1}）")
                 else:
@@ -296,7 +296,7 @@ class App:
             self._last = (target, ranked[0])
             writer(ranked[0])
             self._garble_log(self._cycle)
-            self.notify(f"亂碼轉中文：{ranked[0]}（F1 換下一個 · F2 退回，共 {len(ranked)} 個）{route.tail()}")
+            self.notify(f"亂碼轉中文：{ranked[0]}（F1 換下一個 · F3 用這句重算 · F2 退回，共 {len(ranked)} 個）{route.tail()}")
             return
         best = ranked[0]
         route_ch = grab.last_channel()
@@ -320,7 +320,7 @@ class App:
             except Exception:
                 pass
             tag = "重算" if force else "已修正"
-            self.notify(f"{tag}：{editfmt.fmt_edits(changes)}（F1 換下一個 · F2 退回，共 {len(ranked)} 個）{bar}{route.tail()}")
+            self.notify(f"{tag}：{editfmt.fmt_edits(changes)}（F1 換下一個 · F3 用這句重算 · F2 退回，共 {len(ranked)} 個）{bar}{route.tail()}")
         elif force:
             self.notify(f"目前沒有可再修的同音字：{target}{bar}")
         elif len(ranked) > 1:
