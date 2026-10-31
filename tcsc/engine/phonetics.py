@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # 算字大師（TCSC）
-# Copyright (C) 2026 tcsc-dev  <https://github.com/ncku2026tcsc/tcsc>
+# Copyright (C) 2026 tcsc-dev  <https://github.com/tcsc2026/tcsc>
 # Licensed under the GNU General Public License v3.0 or later; see LICENSE.
 import os
 
@@ -221,7 +221,7 @@ def same_sound(a: str, b: str) -> bool:
 def circle(ch: str) -> list:
     _load()
     out, seen = [], set()
-    for r in readings(ch):
+    for r in sorted(readings(ch)):
         for x in _reading2chars.get(r, []):
             if x not in seen:
                 seen.add(x)
@@ -238,7 +238,7 @@ def homophones(ch: str, limit: int = 12) -> list:
     wordphon._load()
     freq = wordphon._freq
     scored = []
-    for r in readings(ch):
+    for r in sorted(readings(ch)):
         chars = _reading2chars.get(r, [])
         by_freq = sorted(chars, key=lambda c: -freq.get(c, 0))
         f_rank = {c: i for i, c in enumerate(by_freq)}

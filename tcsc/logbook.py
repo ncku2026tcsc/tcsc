@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # 算字大師（TCSC）
-# Copyright (C) 2026 tcsc-dev  <https://github.com/ncku2026tcsc/tcsc>
+# Copyright (C) 2026 tcsc-dev  <https://github.com/tcsc2026/tcsc>
 # Licensed under the GNU General Public License v3.0 or later; see LICENSE.
 import datetime
 import json
@@ -155,7 +155,7 @@ def clear_all() -> int:
 def export_for_author(out_path) -> int:
     lines = ["算字大師：回報給作者的難例",
              "這份檔案是從你電腦裡的加密紀錄解出來的，只有你看得到。",
-             "請先看過一遍，不想給的整段刪掉，再寄到 ncku2026tcsc@gmail.com。",
+             "請先看過一遍，不想給的整段刪掉，再寄到 tcsc2026report@gmail.com。",
              "寄來的資料只用來改進程式，不會公開；要刪除隨時來信。", ""]
     n = 0
     for r in records(ERROR_FILE):

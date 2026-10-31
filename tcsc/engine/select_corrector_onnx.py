@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # 算字大師（TCSC）
-# Copyright (C) 2026 tcsc-dev  <https://github.com/ncku2026tcsc/tcsc>
+# Copyright (C) 2026 tcsc-dev  <https://github.com/tcsc2026/tcsc>
 # Licensed under the GNU General Public License v3.0 or later; see LICENSE.
 import math
 import os
@@ -129,6 +129,15 @@ class OnnxCorrector:
         scored = sorted((s for s in self._score(clause) if s[1] != clause),
                         key=lambda x: x[0], reverse=True)
         out = [best] if best != clause else [clause]
+        from .. import settings as _st
+        lcs = getattr(self, "last_court_sc", None)
+        if _st.get("list_court_order", True) and lcs and lcs[0] == clause:
+            sc = lcs[1]
+            for p in sorted((p for p in sc if p != clause), key=lambda p: -sc[p]):
+                if p not in out:
+                    out.append(p)
+                if len(out) >= top_n:
+                    break
         for _, cand, _e in scored:
             if cand not in out:
                 out.append(cand)

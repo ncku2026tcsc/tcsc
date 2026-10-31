@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # 算字大師（TCSC）
-# Copyright (C) 2026 tcsc-dev  <https://github.com/ncku2026tcsc/tcsc>
+# Copyright (C) 2026 tcsc-dev  <https://github.com/tcsc2026/tcsc>
 # Licensed under the GNU General Public License v3.0 or later; see LICENSE.
 import math
 
@@ -619,6 +619,59 @@ class OnnxCorrectorV2(OnnxCorrector):
         except Exception:
             return []
 
+    WIN_K = 5
+    WIN_TH = 0.0
+    WIN_OUT = 6
+
+    def _window_props(self, clause):
+        try:
+            from . import detprop
+            bert = getattr(self, "judge", None) or self.bert
+            n = len(clause)
+            han = lambda i: 0 <= i < n and "一" <= clause[i] <= "鿿"
+            wins = []
+            for p, _pr in detprop.suspects(clause, th=self.WIN_TH, cap=self.WIN_K):
+                for w in ((p,), (p - 1, p), (p, p + 1)):
+                    if all(han(i) for i in w) and w not in wins:
+                        wins.append(w)
+            if not wins:
+                return []
+            base = bert.encode(clause)
+            batch = []
+            for w in wins:
+                ids = list(base)
+                for i in w:
+                    ids[i + 1] = bert.mask
+                batch.append(ids)
+            logits = bert.run(batch)
+            cands = {}
+            for wi, w in enumerate(wins):
+                lps = {i: log_softmax(logits[wi][i + 1]) for i in w}
+                orig = 0.0
+                for i in w:
+                    t = bert.token_id(clause[i])
+                    orig += float(lps[i][t]) if t is not None else -30.0
+                beam = [("", 0.0)]
+                for i in w:
+                    slot = sorted(((float(lps[i][t]), ch) for ch in phonetics.circle(clause[i])
+                                   if (t := bert.token_id(ch)) is not None), reverse=True)[:4]
+                    beam = sorted([(s + ch, sc + v) for s, sc in beam for v, ch in slot], key=lambda x: -x[1])[:4]
+                old = clause[w[0]:w[-1] + 1]
+                for s, sc in beam[:2 if len(w) == 1 else 3]:
+                    if s != old:
+                        cur = clause[:w[0]] + s + clause[w[-1] + 1:]
+                        cands[cur] = max(cands.get(cur, -1e9), sc - orig)
+            out = []
+            for _sc, x in sorted(((sc, x) for x, sc in cands.items()), reverse=True):
+                x = self._pron_canon(x, clause)
+                if x != clause and x not in out:
+                    out.append(x)
+                if len(out) >= self.WIN_OUT:
+                    break
+            return out
+        except Exception:
+            return []
+
     def _pron_canon(self, p, clause):
         if len(p) != len(clause):
             return p
@@ -677,10 +730,11 @@ class OnnxCorrectorV2(OnnxCorrector):
         extra =self._samechar_variants(clause, proposals) if scm != "off" else []
         lat = self._lattice_props(clause) if settings.get("lattice_prop") else []
         det = self._detmask_props(clause) if settings.get("det_prop") else []
+        win = self._window_props(clause) if settings.get("det_windows", True) else []
         rd = self._redup_props(clause)
         esc = self._escort_props(clause) if (settings.get("escort_words") and not (
             settings.get("det_prop") and settings.get("hollow_takeover", True))) else []
-        if len(proposals) + len(wd) + len(extra) + len(lat) + len(det) + len(rd) \
+        if len(proposals) + len(wd) + len(extra) + len(lat) + len(det) + len(win) + len(rd) \
                 + len(esc) + len(f7) + len(rsp) == 1:
             return pronoun.apply_pref(clause, ni, ta)
         _cap = self._prop_cap()
@@ -691,6 +745,7 @@ class OnnxCorrectorV2(OnnxCorrector):
         props += [m for m in extra if m not in props]
         props += [m for m in lat if m not in props]
         props += [m for m in det if m not in props]
+        props += [m for m in win if m not in props]
         props += [m for m in esc if m not in props]
         scores = self._court_scores(clause, props)
         self.last_court = (clause, list(scores))

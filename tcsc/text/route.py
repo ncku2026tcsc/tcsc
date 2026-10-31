@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # 算字大師（TCSC）
-# Copyright (C) 2026 tcsc-dev  <https://github.com/ncku2026tcsc/tcsc>
+# Copyright (C) 2026 tcsc-dev  <https://github.com/tcsc2026/tcsc>
 # Licensed under the GNU General Public License v3.0 or later; see LICENSE.
 from collections import namedtuple
 
@@ -43,7 +43,7 @@ def grab_channel() -> str:
     return f"term:{g}" if _state["layer"] == "終端機" else g
 
 
-_G = {"uia": "UIA", "clip": "剪貼簿", "uia→clip": "UIA 讀不到→剪貼簿", "ia2": "IA2", "sel": "反白",
+_G = {"uia": "UIA", "clip": "剪貼簿", "uia→clip": "UIA 讀不到→剪貼簿", "uia→ia2": "UIA 讀不到→IA2", "ia2": "IA2", "sel": "反白",
       "ia2→uia": "IA2 讀不到→UIA", "ia2→uia→clip": "IA2、UIA 讀不到→剪貼簿", "ia2→sel": "IA2 讀不到→反白"}
 _W = {"paste": "貼上", "type": "打字", "backspace": "退格重打", "ia2": "IA2 直改",
       "ia2→paste": "IA2 寫不進→貼上", "ia2→type": "IA2 寫不進→打字",

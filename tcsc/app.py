@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # 算字大師（TCSC）
-# Copyright (C) 2026 tcsc-dev  <https://github.com/ncku2026tcsc/tcsc>
+# Copyright (C) 2026 tcsc-dev  <https://github.com/tcsc2026/tcsc>
 # Licensed under the GNU General Public License v3.0 or later; see LICENSE.
 import ctypes
 import gc
@@ -21,8 +21,8 @@ from .keys.movers import Movers
 from .text import clip, grab, route, win, winkeys as wk, write
 from .ui import arena, autostart, editfmt, iconart, notify, tray
 
-AUTHOR_EMAIL = "ncku2026tcsc@gmail.com"
-GITHUB_URL = "https://github.com/ncku2026tcsc/tcsc"
+AUTHOR_EMAIL = "tcsc2026report@gmail.com"
+GITHUB_URL = "https://github.com/tcsc2026/tcsc"
 TOP_N = 10
 DEL_ARM_S = 4.0
 PRON_RANK_MAX = 20
@@ -435,7 +435,7 @@ class App:
         if cyc and cyc.get("read_fn") and not garbled:
             self._cycle_correct(cyc["read_fn"], cyc["kind"], force=True)
         else:
-            self._cycle_correct(lambda: grab.read_unit(self), "unit", force=True)
+            self._cycle_correct(lambda: grab.read_unit(self, garble_ok=False), "unit", force=True)
         if self._cycle and orig0:
             self._cycle["orig"] = orig0
             if orig0 not in self._cycle["list"]:
@@ -939,9 +939,9 @@ class App:
 
     def _learn_selected(self, run):
         from .engine import userdict, wordphon
-        word = grab.grab_word(self, maxlen=8)
+        word = grab.grab_word(self, maxlen=8, copy_browser=True)
         if word == "":
-            self._pass_key("f7")
+            self.notify("先反白要學的詞，再按 F7")
             return
         if not word:
             return
@@ -1014,7 +1014,7 @@ class App:
             except Exception as e:
                 crashlog.log(f"亂碼轉中文：通順度複審失敗，照裁判順序 {e!r}")
         pool = [c for c in pool if self._in_vocab(c)] + [c for c in pool if not self._in_vocab(c)]
-        return self._prefer(pool)[:top_n]
+        return [g.respace(c) for c in self._prefer(pool)[:top_n]]
 
     def _in_vocab(self, text):
         bert = getattr(self.corrector, "judge", None) or getattr(self.corrector, "bert", None)
@@ -1087,7 +1087,7 @@ class App:
 
     @staticmethod
     def _sym_mode():
-        m = settings.get("sym_write") or "follow"
+        m = settings.get("sym_write") or "paste"
         if m in ("type", "paste"):
             return m
         return "type" if settings.get("write_mode") == "type" else "paste"
@@ -1135,6 +1135,10 @@ class App:
             self.first_run_setup()
 
     def first_run_setup(self):
+        if getattr(sys, "frozen", False) and os.path.exists(os.path.join(os.path.dirname(sys.executable), "unins000.exe")):
+            settings.set("firstrun_done", True)
+            return
+
         def go():
             from .ui import firstrun
             try:
@@ -1427,6 +1431,12 @@ class App:
                                  False: "寫完自動檢查：關"},
                  "notify_route": {True: "通知顯示改字路線：開。通知最後會標這次怎麼抓字、怎麼寫回，回報問題時有用",
                                   False: "通知顯示改字路線：關"},
+                 "uia_wake_blink": {True: "讀不到游標先眨一下再讀：開。網頁說找不到游標時，焦點離開再回來，游標掛上後再讀",
+                                    False: "讀不到游標先眨一下再讀：關。找不到游標就直接換別的讀法"},
+                 "ia2_read_fallback": {True: "瀏覽器讀不到先試 IA2：開。瀏覽器裡直接讀不到字時，先用 IA2 讀，最後才用剪貼簿",
+                                       False: "瀏覽器讀不到先試 IA2：關。讀不到就直接用剪貼簿"},
+                 "sel_fallback_bs": {True: "選不起來改退格重打：開。要換掉的字選不起來時，確認游標前是原字，改成退格刪掉再寫",
+                                     False: "選不起來改退格重打：關。選不起來就停手，一個字都不動"},
                  "ime_commit": {True: "自動收掉選字底線：開。選字底線還沒收就按 F1，程式會先讓輸入法收掉再改",
                                 False: "自動收掉選字底線：關。要先按 Enter 收掉底線，再按 F1"},
                  "autokey_refill": {True: "改字時打的字自動補上：開。改字那一兩秒按的鍵，改完照順序補回去",
@@ -1435,7 +1445,7 @@ class App:
                                 False: "亂碼照新注音規則組字：關。注音要照順序打才認得"},
                  "garble_rerank": {True: "亂碼再比一次整句通順：開。比較準，每次多約 0.3 秒",
                                    False: "亂碼再比一次整句通順：關。比較快"},
-                 "garble_single": {True: "亂碼只有一個字也轉：開。緊貼在中文後面的一個注音（例：請假vup4）也轉；mp4 這種英文代號會留著",
+                 "garble_single": {True: "亂碼只有一個字也轉：開。結尾只有一個字的注音（例：請假vup4）也轉；要算字按 F3，轉錯按 F2 退回",
                                    False: "亂碼只有一個字也轉：關。至少要兩個字的亂碼才轉"},
                  "garble_on": {True: "亂碼轉中文：開。忘了切注音打出 1u3bj6 這種，按 F1 轉成中文",
                                False: "亂碼轉中文：關"},
@@ -1455,6 +1465,10 @@ class App:
                                   False: "圖示固定在工作列：關。照 Windows 預設收在 ^ 裡"},
                  "escort_shipped": {True: "使用內建常錯字：開。內建的常錯字詞跟你自己加的一起用",
                                     False: "使用內建常錯字：關。只用你自己加的"},
+                 "list_court_order": {True: "F1 連按照裁判排：開。第 4 下以後也照裁判的分數排，裁判看好的候選不會被擠到後面",
+                                      False: "F1 連按照裁判排：關。只有裁判前 3 名保證排在前面，之後照舊的順序"},
+                 "det_windows": {True: "F1 找得更廣：開。可疑的字一個一個分開重找，兩個字連錯（件為→鍵位）也找得到，每次多約 0.1 秒",
+                                 False: "F1 找得更廣：關。照舊的找法，快約 0.1 秒"},
                  "f7_lock": {True: "學滿的詞不讓 F1 改掉：開。F7 強度到 20 的詞，F1 不會去改它",
                              False: "學滿的詞不讓 F1 改掉：關。學滿的詞也只是很難被改"},
                  "f7_direct": {True: "學過的詞優先考慮：開。F7 學過的詞，讀音對得上就一定列入考慮",
@@ -1537,6 +1551,11 @@ class App:
         from .ui.usage import USAGE_TEXT
         threading.Thread(target=lambda: ctypes.windll.user32.MessageBoxW(
             0, USAGE_TEXT, f"{version.APP_TITLE} — 使用說明", 0x40), daemon=True).start()
+
+    def show_f1f3(self):
+        from .ui.usage import F1F3_TEXT
+        threading.Thread(target=lambda: ctypes.windll.user32.MessageBoxW(
+            0, F1F3_TEXT, f"{version.APP_TITLE} — 何時用 F1、何時用 F3", 0x40), daemon=True).start()
 
     def _auto_update_check(self):
         from . import update

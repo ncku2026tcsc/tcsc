@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # 算字大師（TCSC）
-# Copyright (C) 2026 tcsc-dev  <https://github.com/ncku2026tcsc/tcsc>
+# Copyright (C) 2026 tcsc-dev  <https://github.com/tcsc2026/tcsc>
 # Licensed under the GNU General Public License v3.0 or later; see LICENSE.
 import ctypes
 import ctypes.wintypes as wt
@@ -242,7 +242,7 @@ _LESSONS = [
      "格子裡是新注音選錯的句子，游標已經在句尾。\n"
      "按 F1（鍵盤最上排）。第一次按會暖身幾秒。", "edit",
      [("F1", 0x70, "按我")]),
-    ("算一半？按 F3 從這裡再算",
+    ("算一半？按 F3 再算一遍",
      "先按 F1：通常會先改對一部分。\n"
      "還有字不對？按 F3，從現在這句再算一次。\n"
      "不對就再算，來回幾次就會對。", "iter",
@@ -254,9 +254,9 @@ _LESSONS = [
     ("學會了：只要記五顆鍵",
      "F1　選錯字就按，不對再按\n"
      "F2　按過頭退回上一個（Shift+F2 回到原本打的句子）\n"
-     "F3　對了一部分，從這裡再算\n"
+     "F3　改對一部分，把目前算的再丟進去算一遍\n"
      "F7　人名、專有名詞：反白兩個字以上的詞，按 5 下教它\n"
-     "F8　在／再、哪／那選反了\n\n"
+     "F8　在、再選反了\n\n"
      "程式住在右下角，關掉這張卡也一直在。\n"
      "其他好用功能不用記：右下角圖示按右鍵 → 使用說明\n\n"
      "本程式開源、不營利、完全離線，\n"
@@ -700,7 +700,7 @@ def _card(L):
             elif t and t != _SENT_L2 and t != state["last_txt"]:
                 state["last_txt"] = t
                 state["ok_until"] = now + 8.0
-                state["ok_txt"] = "改對一部分了！還有字不對？按 F3 從這裡再算"
+                state["ok_txt"] = "改對一部分了！還有字不對？按 F3 把它再丟進去算一遍"
             elif t == _SENT_L2 and state["last_txt"] not in (None, _SENT_L2):
                 state["last_txt"] = t
                 state["ok_until"] = now + 6.0

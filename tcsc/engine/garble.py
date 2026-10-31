@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # 算字大師（TCSC）
-# Copyright (C) 2026 tcsc-dev  <https://github.com/ncku2026tcsc/tcsc>
+# Copyright (C) 2026 tcsc-dev  <https://github.com/tcsc2026/tcsc>
 # Licensed under the GNU General Public License v3.0 or later; see LICENSE.
 import itertools
 import math
@@ -90,13 +90,24 @@ def _split_glued(raw):
 
 class Garble:
 
-    def __init__(self, start, end, tail, segs):
+    def __init__(self, start, end, tail, segs, gaps=None):
         self.start, self.end, self.tail, self.segs = start, end, tail, segs
+        self.gaps = gaps or [""] * len(segs)
         self.before = ""
 
     @property
     def syllables(self):
         return [r for _raw, r in self.segs if r]
+
+    def respace(self, text):
+        if not any(self.gaps) or len(text) != sum(1 if r else len(raw) for raw, r in self.segs):
+            return text
+        out, i = [], 0
+        for (raw, r), gap in zip(self.segs, self.gaps):
+            n = 1 if r else len(raw)
+            out.append(text[i:i + n] + gap)
+            i += n
+        return "".join(out)
 
     def runs(self):
         out, pos, cur, cur_at = [], 0, [], 0
@@ -200,7 +211,7 @@ def _collect(chunks, reads, base, ime=True):
             else:
                 segs.append((base + a, raw, None))
         else:
-            sp = _split_glued(raw)
+            sp = _split_glued(raw) if raw[-1] in "3467" else None
             if sp:
                 segs.append((base + a + sp[0], raw[sp[0]:], sp[1]))
             break
@@ -211,6 +222,30 @@ def _collect(chunks, reads, base, ime=True):
     return segs if segs[0][2] else None
 
 
+def _digit_split(chunks, ime=True):
+    out = []
+    for a, raw in chunks:
+        k = 0
+        while k < len(raw) and raw[k].isdigit():
+            k += 1
+        if 0 < k < len(raw) and not _syl(raw) and any(c.isalpha() for c in raw[k:]) and _read(raw[k:], ime):
+            out += [(a, raw[:k]), (a + k, raw[k:])]
+        else:
+            out.append((a, raw))
+    return out
+
+
+def _keep_numbers(segs, run, base):
+    while segs and segs[0][2] and not any(c.isalpha() for c in segs[0][1]):
+        q = segs[0][0] - base
+        if not (q > 0 and run[q - 1].isdigit()):
+            break
+        segs = segs[1:]
+        while segs and segs[0][2] is None:
+            segs = segs[1:]
+    return segs or None
+
+
 def _region(run, base, ime=True, need=2):
     k = len(run)
     while k > 0 and run[k - 1] not in TONES:
@@ -218,10 +253,11 @@ def _region(run, base, ime=True, need=2):
     tail = run[k:]
     if tail and not _tail_ok(tail, ime) and not _english_tail(tail):
         return None
-    chunks = _chunks(run[:k])
+    chunks = _digit_split(_chunks(run[:k]), ime)
     if not chunks:
         return None
     best = _collect(chunks, [_read(raw, ime) for _a, raw in chunks], base, ime)
+    best = _keep_numbers(best, run, base) if best else None
     if not best or sum(1 for x in best if x[2]) < need:
         return None
     if not any(r and _syl(raw) == r and any(c.isalpha() for c in raw) for _p, raw, r in best):
@@ -257,6 +293,14 @@ def _runs(line):
         e = s
 
 
+def _gaps(line, segs):
+    out = []
+    for (p, raw, _r), nxt in zip(segs, segs[1:] + [None]):
+        gap = line[p + len(raw):nxt[0]] if nxt else ""
+        out.append(gap if gap and not gap.strip() else "")
+    return out
+
+
 def analyze(line, ime=True):
     tries = 0
     for s, e in _runs(line):
@@ -266,7 +310,7 @@ def analyze(line, ime=True):
         segs = _region(run.lower(), s, ime, 3 if run != run.lower() else 2)
         if segs:
             start, end = segs[0][0], segs[-1][0] + len(segs[-1][1])
-            return Garble(start, end, line[end:], [(line[p:p + len(raw)], r) for p, raw, r in segs])
+            return Garble(start, end, line[end:], [(line[p:p + len(raw)], r) for p, raw, r in segs], _gaps(line, segs))
         tries += 1
         if tries >= 4:
             break
@@ -279,10 +323,16 @@ def analyze_single(line, ime=True):
         return None
     s, e = first
     left = line[s - 1] if s > 0 else ""
-    if not left or left.isascii() or left.isspace():
+    body = line[s:e].rstrip()
+    cut = body.rfind(" ")
+    if cut >= 0 and body[-1] in "3467" and _syl(body[cut + 1:].lower()):
+        s, left = s + cut + 1, ""
+    if left and (left.isascii() or left.isspace()):
+        return None
+    if not left and line[e:].strip():
         return None
     run = line[s:e]
-    if run.isascii() and run.isalpha() and run.isupper():
+    if run.strip().isascii() and run.strip().isalpha() and run.strip().isupper():
         return None
     raw = run.lower()
     if not any("a" <= c <= "z" for c in raw):
@@ -292,7 +342,8 @@ def analyze_single(line, ime=True):
     k = len(raw)
     while k > 0 and raw[k - 1] not in TONES:
         k -= 1
-    chunks, tail = _chunks(raw[:k]), raw[k:]
+    chunks, tail = _digit_split(_chunks(raw[:k]), ime), raw[k:]
+    chunks = chunks[max((k for k, c in enumerate(chunks[:-1]) if c[1].isdigit()), default=-1) + 1:]
     segs = None
     if tail.strip() and not chunks:
         r = _read(tail.rstrip() + " ", ime) if " " not in tail.rstrip() else None
@@ -312,6 +363,9 @@ def analyze_single(line, ime=True):
     start, end = s + segs[0][0], s + segs[-1][0] + len(segs[-1][1])
     g = Garble(start, end, line[end:], [(line[s + p:s + p + len(seg)], r) for p, seg, r in segs])
     g.single = True
+    g.no_context = not left
+    raw_syl = segs[-1][1]
+    g.strict = bool(_syl(raw_syl if raw_syl[-1] in TONES else raw_syl + " "))
     return g
 
 
@@ -335,7 +389,7 @@ def analyze_selection(text, ime=True):
         run, k = low[q:p], p - q
         while k > 0 and run[k - 1] not in TONES:
             k -= 1
-        for a, raw in _chunks(run[:k]):
+        for a, raw in _digit_split(_chunks(run[:k]), ime):
             r = _read(raw, ime)
             sp = None if r or raw[-1] not in "3467" else _split_glued(raw)
             if sp:
@@ -354,7 +408,7 @@ def analyze_selection(text, ime=True):
     if not any(r for _a, _raw, r in segs):
         return None
     start, end = segs[0][0], segs[-1][0] + len(segs[-1][1])
-    return Garble(start, end, text[end:], [(text[p:p + len(raw)], r) for p, raw, r in segs])
+    return Garble(start, end, text[end:], [(text[p:p + len(raw)], r) for p, raw, r in segs], _gaps(text, segs))
 
 
 def find_suffix(line):

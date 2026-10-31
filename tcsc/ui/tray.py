@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # 算字大師（TCSC）
-# Copyright (C) 2026 tcsc-dev  <https://github.com/ncku2026tcsc/tcsc>
+# Copyright (C) 2026 tcsc-dev  <https://github.com/tcsc2026/tcsc>
 # Licensed under the GNU General Public License v3.0 or later; see LICENSE.
 import ctypes
 import threading
@@ -45,7 +45,7 @@ def _promote_once(exe, key=_ICON_KEY):
                         return True
             except OSError:
                 continue
-AUTHOR_EMAIL = "ncku2026tcsc@gmail.com"
+AUTHOR_EMAIL = "tcsc2026report@gmail.com"
 
 
 def _dot(color):
@@ -174,6 +174,7 @@ class Tray:
             head(version.APP_TITLE),
             M("使用說明", Menu(
                 M("使用說明", lambda i, it: app.show_help()),
+                M("何時用 F1、何時用 F3？", lambda i, it: app.show_f1f3()),
                 M("快捷鍵一覽", lambda i, it: app.open_keysheet()),
                 M("重看教學", lambda i, it: app.tutorial_first()),
                 M("快速移動教學", lambda i, it: app.tutorial_movers()))),
@@ -188,6 +189,8 @@ class Tray:
                 M("他／她", Menu(*ta_items)),
                 M("字形", Menu(*glyph_items)),
                 SEP,
+                toggle("det_windows", "F1 找得更廣"),
+                toggle("list_court_order", "F1 連按照裁判排"),
                 toggle("xuci_key", "F8 換在再", app.rebind_hotkeys),
                 toggle("xuci_de", "F8 也換的得地"),
                 toggle("pron_key", "Shift+F8 換人稱", app.rebind_hotkeys),
@@ -255,6 +258,11 @@ class Tray:
                 toggle("auto_verify", "寫完自動檢查"),
                 toggle("autokey_refill", "改字時打的字自動補上"),
                 toggle("ime_commit", "自動收掉選字底線"),
+                toggle("blink_first", "按 F1 先收底線"),
+                toggle("blink_alt", "切焦點時先按 Alt"),
+                toggle("uia_wake_blink", "讀不到游標先眨一下再讀"),
+                toggle("ia2_read_fallback", "瀏覽器讀不到先試 IA2"),
+                toggle("sel_fallback_bs", "選不起來改退格重打"),
                 SEP,
                 toggle("garble_on", "亂碼轉中文"),
                 toggle("garble_ime", "亂碼照新注音規則組字"),

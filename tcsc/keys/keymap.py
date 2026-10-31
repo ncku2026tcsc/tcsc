@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # 算字大師（TCSC）
-# Copyright (C) 2026 tcsc-dev  <https://github.com/ncku2026tcsc/tcsc>
+# Copyright (C) 2026 tcsc-dev  <https://github.com/tcsc2026/tcsc>
 # Licensed under the GNU General Public License v3.0 or later; see LICENSE.
 from collections import namedtuple
 
@@ -56,7 +56,7 @@ GROUPS = [
         Key("F1", hotkey.VK_F1, 0, "f1", "改字：抓游標前那句（有反白＝只修反白）；連按＝換下一個候選", None),
         Key("Tab", VK_TAB, 0, "tab", "＝F1（這句怪怪的就按 Tab）；終端機與自家視窗裡＝原生 Tab", "tab_f1"),
         Key("F2", hotkey.VK_F2, 0, "f2", "退回上一個候選；退到底＝原句；再按＝刪掉剛剛那句（先提示、再按才刪）；沒在改字＝F2 照常給程式", None),
-        Key("F3", hotkey.VK_F3, 0, "f3", "重算：提示模型「這個比較對、但還沒對」，從它再修", None),
+        Key("F3", hotkey.VK_F3, 0, "f3", "重算：把目前算的結果再丟進去算一遍", None),
         Key("Shift+F1", hotkey.VK_F1, SHIFT, "sf1", "改前一句：游標和後句都不動（終端機也行）", None),
         Key("Shift+F2", hotkey.VK_F2, SHIFT, "sf2", "一鍵回原句（保本）；誤按可用 F2 退回", None),
         Key("Shift+F3", hotkey.VK_F3, SHIFT, "sf3", "改後一句：游標和前文都不動；後句要在同一行（終端機也行）", None),
@@ -68,7 +68,7 @@ GROUPS = [
     ("學詞", [
         Key("F5", hotkey.VK_F5, 0, "f5", "把反白的詞收進常識詞庫（讀音多組會跳窗讓你選）；沒反白＝F5 照常給程式（重新整理）", None),
         Key("Shift+F5", hotkey.VK_F5, SHIFT, "sf5", "詞庫查詢窗：查詞／反查注音／看同音圈／補讀音（有反白＝直接查）", None),
-        Key("F7", hotkey.VK_F7, 0, "f7", "把反白的詞學進個人詞庫（再按一次加強）；沒反白＝F7 照常給程式", None),
+        Key("F7", hotkey.VK_F7, 0, "f7", "把反白的詞學進個人詞庫（再按一次加強）", None),
         Key("Shift+F7", hotkey.VK_F7, SHIFT, "sf7", "個人詞庫管理窗", None),
         Key("Shift+F6", hotkey.VK_F6, SHIFT, "sf6", "常錯字清單", None),
     ]),

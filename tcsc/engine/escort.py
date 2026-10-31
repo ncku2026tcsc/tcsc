@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # 算字大師（TCSC）
-# Copyright (C) 2026 tcsc-dev  <https://github.com/ncku2026tcsc/tcsc>
+# Copyright (C) 2026 tcsc-dev  <https://github.com/tcsc2026/tcsc>
 # Licensed under the GNU General Public License v3.0 or later; see LICENSE.
 import os
 
@@ -44,8 +44,14 @@ def words():
 _ccache = {"mtime": None, "chars": ()}
 CHAR_FILE = paths.user("escort_chars.tsv")
 
-DIRECTIONAL_ONLY = frozenset("的地得")
+DIRECTIONAL_ONLY = frozenset("的地得嗎嘛")
 _shipped = frozenset()
+
+NEVER_PAIRS = (frozenset("在再"), frozenset("哪那"), frozenset("嗎嘛"))
+
+
+def blocked(a, b) -> bool:
+    return frozenset((a, b)) in NEVER_PAIRS
 
 
 def set_shipped_chars(chs) -> None:
@@ -118,7 +124,8 @@ def _ship(kind):
         if kind == "pairs":
             mp = {}
             for p in rows:
-                if len(p) >= 2 and len(p[0]) == 1 and len(p[1]) == 1 and p[1] not in mp.setdefault(p[0], []):
+                if len(p) >= 2 and len(p[0]) == 1 and len(p[1]) == 1 and not blocked(p[0], p[1]) \
+                        and p[1] not in mp.setdefault(p[0], []):
                     mp[p[0]].append(p[1])
             _ship_cache[kind] = {k: tuple(v) for k, v in mp.items()}
         elif kind == "chars":
@@ -162,7 +169,7 @@ def pairs():
         with open(PAIR_FILE, encoding="utf-8-sig") as f:
             for line in f:
                 p = line.rstrip("\n").split("\t")
-                if len(p) < 2 or len(p[0]) != 1 or len(p[1]) != 1:
+                if len(p) < 2 or len(p[0]) != 1 or len(p[1]) != 1 or blocked(p[0], p[1]):
                     continue
                 if p[1] not in mp.setdefault(p[0], []):
                     mp[p[0]].append(p[1])
@@ -214,6 +221,8 @@ def add_pair(a, b, note="手動"):
     a, b = (a or "").strip(), (b or "").strip()
     if len(a) != 1 or len(b) != 1 or a == b:
         return False, "字對格式：打出的字→想要的字（各 1 字）"
+    if blocked(a, b):
+        return False, f"「{a}→{b}」兩個字都可能是對的，要看前後文，不收常錯字"
     if b in pairs().get(a, ()):
         return False, f"「{a}→{b}」已在常錯字清單"
     _ensure_dir(PAIR_FILE)
@@ -370,7 +379,6 @@ def harvest(inp, gold, mode="pair", court=None, tag=None):
     added = []
     if not inp or not gold or len(inp) != len(gold) or inp == gold:
         return added
-    _BI = ({"在", "再"}, {"哪", "那"})
     _PRON = set("他她它牠祂你妳您")
     diffs = [i for i, (a, b) in enumerate(zip(inp, gold)) if a != b]
     if not diffs or len(diffs) > 6:
@@ -391,7 +399,7 @@ def harvest(inp, gold, mode="pair", court=None, tag=None):
 
     def _one(i):
         a, b = inp[i], gold[i]
-        if {a, b} in _BI or (a in _PRON and b in _PRON):
+        if blocked(a, b) or (a in _PRON and b in _PRON):
             return
         if court and any(_fair(c, lambda c, i=i, b=b: c[i] == b) for c in court):
             return

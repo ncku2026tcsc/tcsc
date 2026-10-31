@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # 算字大師（TCSC）
-# Copyright (C) 2026 tcsc-dev  <https://github.com/ncku2026tcsc/tcsc>
+# Copyright (C) 2026 tcsc-dev  <https://github.com/tcsc2026/tcsc>
 # Licensed under the GNU General Public License v3.0 or later; see LICENSE.
 import re
 import time
@@ -74,6 +74,7 @@ def _window_uia(n=None):
     proc = win.foreground_process() or "?"
     if _uia_fail.get(proc, 0) >= 3:
         return None
+    blinked, why = False, ""
     for attempt in (1, 2):
         ctx = selprobe.caret_paragraph(timeout=1.2)
         if ctx is not None:
@@ -83,12 +84,20 @@ def _window_uia(n=None):
         if ctx is not None:
             _uia_fail.pop(proc, None)
             return ctx[0]
-        crashlog.log(f"UIA讀不到 [{proc}] {selprobe.last_fail()}")
+        why = selprobe.last_fail() or ""
+        crashlog.log(f"UIA讀不到 [{proc}] {why}")
+        if why.startswith("選取空") and not blinked and settings.get("uia_wake_blink", True):
+            win.focus_blink(win.foreground_hwnd())
+            _nudge()
+            time.sleep(0.05)
+            blinked = True
+            continue
         if attempt == 1 and not _uia_fail.get(proc):
             time.sleep(0.2)
             continue
         break
-    _uia_fail[proc] = _uia_fail.get(proc, 0) + 1
+    if not why.startswith("選取空"):
+        _uia_fail[proc] = _uia_fail.get(proc, 0) + 1
     return None
 
 
@@ -187,6 +196,13 @@ def _window(app, p):
     if p.grab != "auto" or p.layer == "終端機":
         app.notify(MSG_UIA_BLIND if not p.layer else f"{p.layer}：UIA 讀不到這個視窗的字{MSG_ENTER}")
         return None, None, p
+    if win.foreground_process() in win.BROWSERS and settings.get("ia2_read_fallback", True):
+        try:
+            w = ia2text.read_before_caret(back=200, timeout=0.8)[0]
+        except Exception:
+            w = None
+        if w is not None:
+            return w, "uia→ia2", p
     w = _window_clip()
     if w is None:
         app.notify("UIA 讀不到，換剪貼簿也沒抓到字——" + MSG_NO_GRAB)
@@ -207,7 +223,7 @@ def _writer(app, p, old, new_of, anchor="", conv=None):
 def _conv(p, ch, line_raw, old_raw):
     if not p.auto or p.layer == "終端機" or not settings.get("auto_verify", True):
         return None
-    kind = "ia2" if ch == "ia2" else ("uia" if ch in ("uia", "ia2→uia") else None)
+    kind = "ia2" if ch in ("ia2", "uia→ia2") else ("uia" if ch in ("uia", "ia2→uia") else None)
     if kind is None or not line_raw.endswith(old_raw):
         return None
     return {"reader": kind, "head": line_raw[:len(line_raw) - len(old_raw)], "after0": converge.read_after(kind)}
@@ -250,18 +266,22 @@ def _log_garble_miss(line):
 
 
 def _hidden(p):
-    return settings.get("ime_commit", True) and (p.layer == "終端機" or win.foreground_process() in win.COMPOSE_HIDDEN)
+    if not settings.get("ime_commit", True):
+        return False
+    proc = win.foreground_process()
+    return (p.layer == "終端機" or proc in win.COMPOSE_HIDDEN
+            or (settings.get("blink_first", True) and proc in win.BLINK_FIRST))
 
 
 def _commit_now():
     fg = win.foreground_hwnd()
-    if win.ime_chinese(fg):
+    if win.ime_chinese(fg) or (win.foreground_process() in win.IME_UNKNOWN and win.zh_layout(fg)):
         win.focus_blink(fg)
         return True
     return False
 
 
-def read_unit(app, blinked=False):
+def read_unit(app, blinked=False, garble_ok=True):
     p = route.plan()
     commit = settings.get("ime_commit", True)
     hidden = _hidden(p)
@@ -270,12 +290,12 @@ def read_unit(app, blinked=False):
     window, ch, p = _window(app, p)
     if window is None and hidden and not blinked:
         win.focus_blink(win.foreground_hwnd())
-        return read_unit(app, blinked=True)
+        return read_unit(app, blinked=True, garble_ok=garble_ok)
     if window is None:
         return None
     line_raw = _last_line(window, p)
     _state["garble"] = None
-    if settings.get("garble_on", True):
+    if garble_ok and settings.get("garble_on", True):
         ime = bool(settings.get("garble_ime", True))
         g = garble.analyze(line_raw, ime=ime)
         if (g and line_raw == (window or "").rstrip("\r\n") and len(window or "") >= GRAB_CHARS - 2
@@ -287,17 +307,19 @@ def read_unit(app, blinked=False):
                 if g2 and len(lr) - g2.start > len(line_raw) - g.start:
                     line_raw, g = lr, g2
         cyc = getattr(app, "_cycle", None)
-        if not g and settings.get("garble_single", True) and not (cyc and cyc.get("garble")):
+        head = getattr(app, "_cyc_head", None)
+        cycling = bool(cyc and cyc.get("garble") and head and head(cyc, line_raw) is not None)
+        if not g and settings.get("garble_single", True) and not cycling:
             g1 = garble.analyze_single(line_raw, ime=ime)
             if g1:
                 ok = getattr(app, "_single_garble_ok", None)
                 hint, _state["single_hint"] = _state.get("single_hint"), None
                 forced = bool(hint and hint[0] == line_raw and time.monotonic() - hint[1] < SINGLE_HINT_S)
-                if forced or (ok and ok(line_raw, g1)):
+                if getattr(g1, "strict", False) or forced or (ok and ok(line_raw, g1)):
                     g = g1
                 else:
                     _state["single_hint"] = (line_raw, time.monotonic())
-                    app.notify(f"結尾的「{line_raw[g1.start:g1.end].strip()}」像是忘了切中文打的注音？再按一次 F1 轉成中文")
+                    app.notify(f"結尾的「{line_raw[g1.start:g1.end].strip()}」像是忘了切中文打的注音？再按一次 F1 轉成中文，要算字按 F3")
                     return None
         if not g:
             _log_garble_miss(line_raw)
@@ -315,7 +337,7 @@ def read_unit(app, blinked=False):
         crashlog.log(f"抓到字但切不出句子（{ch}）尾段={crashlog.q(line_raw[-40:])}")
         if commit and not blinked and (hidden or win.ime_chinese(win.foreground_hwnd())):
             win.focus_blink(win.foreground_hwnd())
-            return read_unit(app, blinked=True)
+            return read_unit(app, blinked=True, garble_ok=garble_ok)
         app.notify(MSG_NO_UNIT)
         return None
     route.note_grab(ch, p.layer)
@@ -464,10 +486,11 @@ def read_next_unit(app):
     return _sel_result(nxt, lambda new: write.write_next(app, old_raw, mid + new, p.write), forced=False)
 
 
-def grab_word(app, maxlen=8, hint=""):
+def grab_word(app, maxlen=8, hint="", copy_browser=False):
     from . import winkeys as wk
     try:
-        if selprobe.probe(timeout=0.25) == selprobe.NOSEL:
+        browser = copy_browser and win.foreground_process() in win.BROWSERS
+        if not browser and selprobe.probe(timeout=0.25) == selprobe.NOSEL:
             return ""
     except Exception:
         pass

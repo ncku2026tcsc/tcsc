@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # 算字大師（TCSC）
-# Copyright (C) 2026 tcsc-dev  <https://github.com/ncku2026tcsc/tcsc>
+# Copyright (C) 2026 tcsc-dev  <https://github.com/tcsc2026/tcsc>
 # Licensed under the GNU General Public License v3.0 or later; see LICENSE.
 import io
 import json
@@ -11,9 +11,9 @@ from . import config, paths
 
 SPEC = (
     ("grab_mode", "auto"),
-    ("ia2_browser", False),
+    ("ia2_browser", True),
     ("write_mode", "paste"),
-    ("sym_write", "follow"),
+    ("sym_write", "paste"),
     ("log_on", True),
     ("log_detail", False),
     ("log_keep_days", 30),
@@ -31,6 +31,8 @@ SPEC = (
     ("xuci_key", True),
     ("xuci_de", False),
     ("pron_key", True),
+    ("det_windows", True),
+    ("list_court_order", True),
     ("respell_prop", 0),
     ("escort_shipped", True),
     ("f7_lock", True),
@@ -40,6 +42,11 @@ SPEC = (
     ("autokey_refill", True),
     ("auto_verify", True),
     ("notify_route", False),
+    ("uia_wake_blink", True),
+    ("ia2_read_fallback", True),
+    ("sel_fallback_bs", True),
+    ("blink_first", True),
+    ("blink_alt", False),
     ("ime_commit", True),
     ("term_auto", True),
     ("esc_mode", "double"),

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # 算字大師（TCSC）
-# Copyright (C) 2026 tcsc-dev  <https://github.com/ncku2026tcsc/tcsc>
+# Copyright (C) 2026 tcsc-dev  <https://github.com/tcsc2026/tcsc>
 # Licensed under the GNU General Public License v3.0 or later; see LICENSE.
 import time
 
@@ -36,7 +36,7 @@ def _emit(text: str, mode: str, reselect: bool = False):
 
 
 def _sel_fix(n):
-    got = selprobe.sel_length()
+    got = _settled(selprobe.sel_length(), n)
     for _ in range(2):
         if not got:
             return None
@@ -47,7 +47,7 @@ def _sel_fix(n):
         else:
             wk.select_right(got - n)
         time.sleep(0.05)
-        got = selprobe.sel_length()
+        got = _settled(selprobe.sel_length(), n)
     if got == n:
         return True
     if got:
@@ -55,10 +55,27 @@ def _sel_fix(n):
     return False if got else None
 
 
-def _sel_copied(old) -> bool:
+def _settled(got, n, limit=0.6):
+    if not got or got == n:
+        return got
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < limit:
+        time.sleep(0.04)
+        cur = selprobe.sel_length()
+        if cur == got or cur == n:
+            return cur
+        got = cur
+        if not got:
+            return got
+    return got
+
+
+def _sel_copied(old, quick=False) -> bool:
     if route.plan().layer == "終端機":
         return False
-    sel = clip.selection_text(False, timeout=0.6)
+    sel = clip.selection_text(False, timeout=0.25 if quick else 0.6)
+    if not sel and not quick:
+        sel = clip.selection_text(False, timeout=1.0)
     ok = bool(sel) and sel.replace("\r\n", "\n") == old.replace("\r\n", "\n")
     if not ok:
         crashlog.log(f"選取核對：複製到 {'（空）' if not sel else crashlog.q(sel[-30:])}，要蓋的是 {crashlog.q(old[-30:])}"
@@ -81,7 +98,15 @@ def _wait_caret_back(limit=1.0):
         time.sleep(0.08)
 
 
-def _select_old(app, old) -> bool:
+def _sel_fail(app, why, soft):
+    if soft:
+        crashlog.log(f"選取失敗（{why}）→ 改退格重打")
+        return None
+    app.abort_write(why)
+    return False
+
+
+def _select_old(app, old, soft=False):
     _state.pop("blinked", None)
     n = _steps(old)
     wk.select_left(n)
@@ -91,9 +116,8 @@ def _select_old(app, old) -> bool:
         if fixed is True:
             return True
         if fixed is False:
-            app.abort_write("選取對不準（補了兩次還是不對，已收回）")
-            return False
-    if _sel_confirmed() or _sel_copied(old):
+            return _sel_fail(app, "選取對不準（補了兩次還是不對，已收回）", soft)
+    if _sel_confirmed() or _sel_copied(old, quick=settings.get("ime_commit", True)):
         return True
     wk.select_right(n)
     time.sleep(0.12)
@@ -105,8 +129,7 @@ def _select_old(app, old) -> bool:
     time.sleep(settings.sp(0.04) + 0.06)
     if _sel_confirmed() or _sel_copied(old):
         return True
-    app.abort_write("選取沒有成立（試了兩次）")
-    return False
+    return _sel_fail(app, "選取沒有成立（試了兩次）", soft)
 
 
 def _kept_tail(old, new):
@@ -117,16 +140,18 @@ def _kept_tail(old, new):
     return k if k < len(old) else 0
 
 
-def _swap(app, old, new, mode):
+def _swap(app, old, new, mode, soft=False):
     k = _kept_tail(old, new)
     if k:
         wk.move(-k)
         try:
-            return _swap(app, old[:-k], new[:-k], mode)
+            return _swap(app, old[:-k], new[:-k], mode, soft)
         finally:
             wk.move(k)
-    if old and not _select_old(app, old):
-        return False
+    if old:
+        ok = _select_old(app, old, soft) if soft else _select_old(app, old)
+        if ok is not True:
+            return ok
     escstop.check()
     _emit(new, "paste" if _state.pop("blinked", False) else mode)
     return True
@@ -145,7 +170,30 @@ def write_unit(app, old, new, mode):
             finally:
                 wk.move(k)
         return _write_backspace(app, old, new) is not False
-    return _swap(app, old, new, mode)
+    p = route.plan()
+    soft = p.auto and p.layer != "終端機" and settings.get("sel_fallback_bs", True)
+    r = _swap(app, old, new, mode, soft)
+    if r is None:
+        return _fallback_backspace(app, old, new)
+    return r
+
+
+def _fallback_backspace(app, old, new):
+    k = selprobe.sel_length()
+    if k:
+        wk.select_right(k)
+        time.sleep(0.05)
+    before = _caret_text()
+    if before is None and win.foreground_process() in win.BROWSERS:
+        try:
+            before = ia2text.read_before_caret(back=len(old) + 40, timeout=0.6)[0]
+        except Exception:
+            before = None
+    if before is None or not before.replace("\r\n", "\n").endswith(old.replace("\r\n", "\n")):
+        app.abort_write("選取不成立，改退格重打前確認不到游標前是原字（已停手）")
+        return False
+    crashlog.log("選取不成立 → 退格重打（游標前確認是原字）")
+    return _write_backspace(app, old, new) is not False
 
 
 def _modes(base):
@@ -215,7 +263,7 @@ def write_selection(app, old, new, mode):
     _emit(new, mode, reselect=True)
 
 
-def _write_backspace(app, old, new):
+def _write_backspace(app, old, new, retry=True):
     t0 = _caret_text()
     wk.tap(win.VK_BACK)
     if t0 is not None:
@@ -230,6 +278,13 @@ def _write_backspace(app, old, new):
             if time.monotonic() >= deadline:
                 break
         if not changed:
+            if retry and settings.get("ime_commit", True):
+                crashlog.log("退格進不去，先收底線再試一次")
+                win.focus_blink(win.foreground_hwnd())
+                _wait_caret_back()
+                t2 = _caret_text()
+                if t2 is not None and t2.endswith(old):
+                    return _write_backspace(app, old, new, retry=False)
             app.abort_write("退格進不去")
             return False
     for _ in range(len(old) - 1):
@@ -276,6 +331,17 @@ def _ime_composing_probe(ia2: bool = False) -> bool:
             crashlog.log("組字探針第一次沒選到，再探一次")
             time.sleep(0.12)
     return True
+
+
+def _clear_underline(ia2=False) -> bool:
+    if not _ime_composing_probe(ia2=ia2):
+        return True
+    if not settings.get("ime_commit", True):
+        return False
+    crashlog.log("偵測到選字底線，先收掉再寫")
+    win.focus_blink(win.foreground_hwnd())
+    _wait_caret_back()
+    return not _ime_composing_probe(ia2=ia2)
 
 
 def _ia2_after(app, why, old, new, check_missing):
@@ -445,7 +511,7 @@ def _ia2_fallback_unit(app, why, old, new, base, anchor):
 def write_unit_ia2(app, old, new, base=None, anchor="", conv=None):
     if old == new:
         return
-    if _ime_composing_probe(ia2=True):
+    if not _clear_underline(ia2=True):
         app.abort_write("組字中（IA2，探了兩次）")
         return
     why = _ia2_try(lambda: ia2text.replace_before_caret(old, new, timeout=1.2))
@@ -476,7 +542,7 @@ def write_selection_ia2(app, old, new, base=None):
 def write_next_ia2(app, old, new, base=None):
     if old == new:
         return
-    if _ime_composing_probe(ia2=True):
+    if not _clear_underline(ia2=True):
         app.abort_write("組字中（IA2，探了兩次）")
         return
     why = _ia2_try(lambda: ia2text.replace_after_caret(old, new, timeout=1.2))

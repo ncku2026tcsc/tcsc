@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # 算字大師（TCSC）
-# Copyright (C) 2026 tcsc-dev  <https://github.com/ncku2026tcsc/tcsc>
+# Copyright (C) 2026 tcsc-dev  <https://github.com/tcsc2026/tcsc>
 # Licensed under the GNU General Public License v3.0 or later; see LICENSE.
 import ctypes
 import os
@@ -8,6 +8,7 @@ import time
 from ctypes import wintypes
 
 from . import winkeys as wk
+from .. import settings
 from ..engine import crashlog, escstop
 
 _user32 = ctypes.windll.user32
@@ -25,6 +26,8 @@ BROWSERS = frozenset({"chrome.exe", "msedge.exe", "firefox.exe", "brave.exe",
                       "opera.exe", "vivaldi.exe", "arc.exe"})
 UIA_DEAF = frozenset({"powerpnt.exe"})
 COMPOSE_HIDDEN = frozenset({"line.exe"})
+BLINK_FIRST = frozenset({"notepad.exe", "firefox.exe"})
+IME_UNKNOWN = frozenset({"notepad.exe"})
 
 
 def foreground_hwnd():
@@ -86,6 +89,13 @@ def ime_chinese(hwnd) -> bool:
         if not ime or not _user32.SendMessageW(ime, 0x283, 0x5, 0):
             return False
         return bool(_user32.SendMessageW(ime, 0x283, 0x1, 0) & 0x1)
+    except Exception:
+        return False
+
+
+def zh_layout(hwnd) -> bool:
+    try:
+        return (_user32.GetKeyboardLayout(_user32.GetWindowThreadProcessId(hwnd, None)) & 0xFFFF) == 0x0404
     except Exception:
         return False
 
@@ -159,22 +169,25 @@ def release_all_mods():
 
 
 def focus_blink(fg):
+    alt = settings.get("blink_alt", False)
     try:
         shell = _user32.GetShellWindow() or _user32.GetDesktopWindow()
         tid_me = _kernel32.GetCurrentThreadId()
         tid_fg = _user32.GetWindowThreadProcessId(fg, None)
         _user32.AttachThreadInput(tid_me, tid_fg, True)
         try:
-            wk.tap(VK_MENU)
+            if alt:
+                wk.tap(VK_MENU)
             ok1 = _user32.SetForegroundWindow(shell)
             time.sleep(0.10)
             moved = _user32.GetForegroundWindow() != fg
-            wk.tap(VK_MENU)
+            if alt:
+                wk.tap(VK_MENU)
             ok2 = _user32.SetForegroundWindow(fg)
         finally:
             _user32.AttachThreadInput(tid_me, tid_fg, False)
         time.sleep(0.15)
         back = _user32.GetForegroundWindow() == fg
-        crashlog.log(f"焦點眨眼 出={bool(ok1)} 真的動了={moved} 回={bool(ok2)} 落回原窗={back}")
+        crashlog.log(f"焦點眨眼{'（按 Alt）' if alt else ''} 出={bool(ok1)} 真的動了={moved} 回={bool(ok2)} 落回原窗={back}")
     except Exception as e:
         crashlog.log(f"焦點眨眼炸裂 {type(e).__name__}: {e}")
