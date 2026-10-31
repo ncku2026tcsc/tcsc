@@ -1204,6 +1204,8 @@ class App:
             except Exception as e:
                 crashlog.log(f"符號鍵管理窗錯誤：{e!r}")
                 self.notify(f"符號鍵管理窗錯誤：{e}")
+            finally:
+                gc.collect()
         threading.Thread(target=go, daemon=True).start()
 
     def open_keybinder(self):
@@ -1385,6 +1387,8 @@ class App:
                 root.destroy()
             except Exception:
                 col = None
+            root = None
+            gc.collect()
             if not col:
                 return
             settings.set("bubble_face_custom", col)
@@ -1400,6 +1404,8 @@ class App:
                 keysheet.open_keysheet()
             except Exception as e:
                 self.notify(f"快捷鍵表視窗錯誤：{e}")
+            finally:
+                gc.collect()
         threading.Thread(target=go, daemon=True).start()
 
     def factory_reset(self):

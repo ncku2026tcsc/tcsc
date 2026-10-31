@@ -4,6 +4,7 @@
 # Licensed under the GNU General Public License v3.0 or later; see LICENSE.
 import ctypes
 import ctypes.wintypes as wt
+import gc
 import queue
 import threading
 import time
@@ -149,6 +150,7 @@ def _run(lessons, warmup, on_close):
             except Exception:
                 pass
         _st["alive"] = False
+        gc.collect()
         if on_close is not None:
             _swallow(on_close)
 

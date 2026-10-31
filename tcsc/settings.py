@@ -57,7 +57,7 @@ SPEC = (
     ("bubble_face", "white"),
     ("bubble_face_custom", "#87bacb"),
     ("calc_pulse", "candy"),
-    ("bubble_pos", "fixed"),
+    ("bubble_pos", "auto"),
     ("bubble_off_x", 40),
     ("bubble_off_y", 40),
     ("bubble_hold_level", 4),

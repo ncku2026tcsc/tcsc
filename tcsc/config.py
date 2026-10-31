@@ -34,7 +34,7 @@ FIXED = {
     'bubble_off_x': 40,
     'bubble_off_y': 40,
     'bubble_pin': False,
-    'bubble_pos': 'fixed',
+    'bubble_pos': 'auto',
     'bubble_size_level': 5,
     'bubble_thru': False,
     'calc_pulse': 'candy',

@@ -83,12 +83,15 @@ class _INPUT(ctypes.Structure):
     _fields_ = (("type", wintypes.DWORD), ("u", _IU))
 
 
+_send_input = ctypes.WinDLL("user32").SendInput
+
+
 def _tap_key(vk):
     seq = (_INPUT * 2)()
     for j, up in enumerate((0, 2)):
         seq[j].type = 1
         seq[j].u.ki = _KI(vk, 0, up, 0, None)
-    _user32.SendInput(2, seq, ctypes.sizeof(_INPUT))
+    _send_input(2, seq, ctypes.sizeof(_INPUT))
 
 
 class HotkeyController:
@@ -205,10 +208,12 @@ def run_hotkeys_loop(bindings: dict, modifiers: int = MOD_NOREPEAT, controller=N
                     if i in registered:
                         _user32.UnregisterHotKey(None, i)
                         del registered[i]
-                        _tap_key(vk_)
-                        time.sleep(0.05)
-                        if _user32.RegisterHotKey(None, i, modifiers | kmods, vk_):
-                            registered[i] = (kvk, bindings[key])
+                        try:
+                            _tap_key(vk_)
+                            time.sleep(0.05)
+                        finally:
+                            if _user32.RegisterHotKey(None, i, modifiers | kmods, vk_):
+                                registered[i] = (kvk, bindings[key])
                     break
             _user32.TranslateMessage(ctypes.byref(msg))
             _user32.DispatchMessageW(ctypes.byref(msg))
